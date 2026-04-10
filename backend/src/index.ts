@@ -12,6 +12,7 @@ import { travelersRouter } from './routes/travelers';
 import { operatorsRouter } from './routes/operators';
 import { bookingsRouter } from './routes/bookings';
 import { safetyRouter } from './routes/safety';
+import { reviewsRouter } from './routes/reviews';
 import { errorHandler } from './middleware/errorHandler';
 import { notFound } from './middleware/notFound';
 
@@ -31,6 +32,7 @@ app.use('/api/v1/travelers', travelersRouter);
 app.use('/api/v1/operators', operatorsRouter);
 app.use('/api/v1/bookings', bookingsRouter);
 app.use('/api/v1/safety', safetyRouter);
+app.use('/api/v1/reviews', reviewsRouter);
 
 // Error handling
 app.use(notFound);
