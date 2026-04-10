@@ -26,14 +26,16 @@
 - [x] Traveler routes: GET/PATCH /travelers/me, GET/PUT /travelers/me/preferences
 - [x] Operator routes: GET /operators (filters: region, category, geo), GET /:id, POST, PATCH
 - [x] Bookings routes: POST /bookings, GET /bookings, GET /:id, PATCH /:id/status
+- [x] Safety routes: POST /safety/location, GET /safety/location/history, POST/GET /safety/contacts, DELETE /safety/contacts/:id, POST /safety/sos
 - [x] CI workflow, PM2, Postgres, Redis on boot
 
 ## In Progress
-- [ ] Safety/location tracking routes (POST /safety/location, GET /safety/location/history, POST /safety/contacts, GET /safety/contacts, POST /safety/sos)
+- [ ] Reviews routes (POST /reviews, GET /operators/:id/reviews)
 
 ## Up Next
-- [ ] Reviews routes
 - [ ] Mobile app (React Native)
+- [ ] Notification service for SOS (email/SMS)
+- [ ] Admin routes (verify operators, manage tiers)
 
 ## API Base URL
 http://localhost:5000/api/v1
@@ -46,3 +48,7 @@ http://localhost:5000/api/v1
 - Redis utils: backend/src/utils/redis.ts
 - Schema: backend/src/utils/schema.sql
 - Env: backend/.env (not in git)
+
+## Notes
+- SOS logs to DB and caches last location in Redis but notification delivery (email/SMS) not yet wired
+- Token expiry causes test failures in rapid-fire tests - re-login needed after 15 min
