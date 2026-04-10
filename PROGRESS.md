@@ -25,14 +25,15 @@
 - [x] Middleware: errorHandler, notFound, authenticate
 - [x] Utils: db.ts (pg pool), redis.ts (ioredis)
 - [x] Auth routes: POST /api/v1/auth/register, login, refresh, logout
+- [x] Traveler routes: GET/PATCH /travelers/me, GET/PUT /travelers/me/preferences
 - [x] CI workflow: .github/workflows/ci.yml
 - [x] PM2, Postgres, Redis set to start on boot
 
 ## In Progress
-- [ ] Traveler profile routes (GET /travelers/me, PATCH /travelers/me, GET/PUT /travelers/me/preferences)
+- [ ] Operator routes (GET /operators, GET /operators/:id, POST, PATCH)
 
 ## Up Next
-- [ ] Operator routes (GET /operators, GET /operators/:id, POST, PATCH)
+- [ ] Bookings routes
 - [ ] Bookings routes
 - [ ] Safety/location tracking routes
 - [ ] Reviews
