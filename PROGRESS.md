@@ -24,15 +24,15 @@
 - [x] Backend entry point, middleware, utils (db.ts, redis.ts)
 - [x] Auth routes: register, login, refresh, logout
 - [x] Traveler routes: GET/PATCH /travelers/me, GET/PUT /travelers/me/preferences
-- [x] Operator routes: GET /operators (with region/category/geo filters), GET /operators/:id, POST, PATCH
+- [x] Operator routes: GET /operators (filters: region, category, geo), GET /:id, POST, PATCH
+- [x] Bookings routes: POST /bookings, GET /bookings, GET /:id, PATCH /:id/status
 - [x] CI workflow, PM2, Postgres, Redis on boot
 
 ## In Progress
-- [ ] Bookings routes (POST /bookings, GET /bookings/:id, PATCH /bookings/:id/status)
+- [ ] Safety/location tracking routes (POST /safety/location, GET /safety/location/history, POST /safety/contacts, GET /safety/contacts, POST /safety/sos)
 
 ## Up Next
-- [ ] Safety/location tracking routes
-- [ ] Reviews
+- [ ] Reviews routes
 - [ ] Mobile app (React Native)
 
 ## API Base URL
