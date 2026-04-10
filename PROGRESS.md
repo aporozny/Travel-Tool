@@ -17,7 +17,8 @@
 - Database: PostgreSQL + PostGIS
 - Cache/Sessions: Redis
 - Auth: JWT (access 15m) + refresh tokens (7d, stored in Redis)
-- Mobile: React Native (not started)
+- Mobile: React Native 0.75 (iOS + Android)
+- Web wrapper: React Native Web (planned)
 
 ## Completed
 - [x] Project structure and folder layout
@@ -27,46 +28,39 @@
 - [x] Traveler routes: GET/PATCH /travelers/me, GET/PUT /travelers/me/preferences
 - [x] Operator routes: GET /operators (filters: region, category, geo), GET /:id, POST, PATCH
 - [x] Bookings routes: POST /bookings, GET /bookings, GET /:id, PATCH /:id/status
-- [x] Safety routes: POST /safety/location, GET /safety/location/history, POST/GET /safety/contacts, DELETE /safety/contacts/:id, POST /safety/sos
+- [x] Safety routes: POST/GET /safety/location, contacts, DELETE contact, POST /safety/sos
 - [x] Reviews routes: POST /reviews, GET /reviews/operator/:id (with stats), GET /reviews/me
 - [x] CI workflow, PM2, Postgres, Redis on boot
-
-## Backend complete
-All core API routes are built and tested. The backend is feature-complete for v1.
+- [x] Mobile app scaffold: React Native 0.75
+  - [x] Auth screens (Login, Register)
+  - [x] Home screen (operator discovery, Nusa Penida filter)
+  - [x] Safety screen (SOS button, location sharing, contacts list)
+  - [x] Navigation (stack + bottom tabs)
+  - [x] Redux store (auth slice with login/register/logout)
+  - [x] Axios API service (JWT interceptor + auto token refresh)
+  - [x] TypeScript types for all entities
 
 ## In Progress
-- [ ] Mobile app (React Native) - iOS + Android from one codebase
+- [ ] Remaining mobile screens:
+  - [ ] Bookings screen (list + create)
+  - [ ] Operator detail screen
+  - [ ] Profile screen (edit profile, preferences)
+  - [ ] Add emergency contact screen
 
-## Up Next (post-mobile)
-- [ ] Notification service for SOS (email/SMS via SendGrid or Twilio)
+## Up Next
+- [ ] Web wrapper (React Native Web)
+- [ ] Notification service for SOS (SendGrid/Twilio)
 - [ ] Admin routes (verify operators, manage tiers)
-- [ ] Operator analytics dashboard
 - [ ] Payment integration (Stripe)
+
+## Mobile app location
+/home/travel-tool/mobile/app/
+
+## To run mobile locally (developer machine)
+1. npm install (in mobile/app)
+2. iOS: cd ios && pod install && cd .. && npm run ios
+3. Android: npm run android
+4. Change API URL in src/services/api.ts for iOS simulator (localhost vs 10.0.2.2)
 
 ## API Base URL
 http://localhost:5000/api/v1
-
-## Routes summary
-- POST/GET         /auth/register, /login, /refresh, /logout
-- GET/PATCH        /travelers/me
-- GET/PUT          /travelers/me/preferences
-- GET              /operators?region=&category=&lat=&lng=&radius=
-- GET              /operators/:id
-- POST/PATCH       /operators, /operators/:id
-- POST/GET         /bookings, /bookings/:id
-- PATCH            /bookings/:id/status
-- POST/GET         /safety/location, /safety/location/history
-- POST/GET/DELETE  /safety/contacts, /safety/contacts/:id
-- POST             /safety/sos
-- POST             /reviews
-- GET              /reviews/operator/:id
-- GET              /reviews/me
-
-## Key Files
-- Entry point: backend/src/index.ts
-- Routes: backend/src/routes/
-- Middleware: backend/src/middleware/
-- DB utils: backend/src/utils/db.ts
-- Redis utils: backend/src/utils/redis.ts
-- Schema: backend/src/utils/schema.sql
-- Env: backend/.env (not in git)
