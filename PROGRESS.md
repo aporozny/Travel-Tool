@@ -8,7 +8,7 @@
 - PostgreSQL 16 + PostGIS: localhost:5432, db=traveller_dev, user=traveller
 - Redis: localhost:6379
 - Process manager: PM2 (app name: travel-tool-api)
-- Start server: pm2 start / pm2 restart travel-tool-api
+- Start server: pm2 restart travel-tool-api
 - View logs: pm2 logs travel-tool-api
 
 ## Stack
@@ -20,21 +20,17 @@
 
 ## Completed
 - [x] Project structure and folder layout
-- [x] Database schema (11 tables: users, travelers, operators, bookings, reviews, safety_contacts, location_history, sos_events, traveler_preferences, consent_records, spatial_ref_sys)
-- [x] Backend entry point (src/index.ts)
-- [x] Middleware: errorHandler, notFound, authenticate
-- [x] Utils: db.ts (pg pool), redis.ts (ioredis)
-- [x] Auth routes: POST /api/v1/auth/register, login, refresh, logout
+- [x] Database schema (11 tables)
+- [x] Backend entry point, middleware, utils (db.ts, redis.ts)
+- [x] Auth routes: register, login, refresh, logout
 - [x] Traveler routes: GET/PATCH /travelers/me, GET/PUT /travelers/me/preferences
-- [x] CI workflow: .github/workflows/ci.yml
-- [x] PM2, Postgres, Redis set to start on boot
+- [x] Operator routes: GET /operators (with region/category/geo filters), GET /operators/:id, POST, PATCH
+- [x] CI workflow, PM2, Postgres, Redis on boot
 
 ## In Progress
-- [ ] Operator routes (GET /operators, GET /operators/:id, POST, PATCH)
+- [ ] Bookings routes (POST /bookings, GET /bookings/:id, PATCH /bookings/:id/status)
 
 ## Up Next
-- [ ] Bookings routes
-- [ ] Bookings routes
 - [ ] Safety/location tracking routes
 - [ ] Reviews
 - [ ] Mobile app (React Native)
