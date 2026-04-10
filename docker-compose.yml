@@ -1,0 +1,51 @@
+version: '3.9'
+
+services:
+  postgres:
+    image: postgis/postgis:15-3.3
+    container_name: traveller-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: traveller
+      POSTGRES_PASSWORD: traveller
+      POSTGRES_DB: traveller_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/src/utils/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+
+  redis:
+    image: redis:7-alpine
+    container_name: traveller-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: traveller-backend
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      NODE_ENV: development
+      PORT: 5000
+      DATABASE_URL: postgresql://traveller:traveller@postgres:5432/traveller_dev
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: dev-jwt-secret-change-in-production
+      JWT_REFRESH_SECRET: dev-refresh-secret-change-in-production
+      ENCRYPTION_KEY: 0000000000000000000000000000000000000000000000000000000000000000
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - ./backend/src:/app/src  # Hot reload in dev
+
+volumes:
+  postgres_data:
+  redis_data:
