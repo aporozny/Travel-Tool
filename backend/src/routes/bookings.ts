@@ -29,6 +29,16 @@ bookingsRouter.post('/', authenticate, async (req: AuthenticatedRequest, res: Re
 
     const body = createBookingSchema.parse(req.body);
 
+    // Validate dates
+    const start = new Date(body.start_date);
+    const today = new Date(); today.setHours(0,0,0,0);
+    if (start < today) {
+      return res.status(400).json({ message: 'Start date cannot be in the past' });
+    }
+    if (body.end_date && new Date(body.end_date) < start) {
+      return res.status(400).json({ message: 'End date must be after start date' });
+    }
+
     // Get traveler id
     const travelerResult = await pool.query(
       'SELECT id FROM travelers WHERE user_id = $1',
@@ -126,8 +136,8 @@ bookingsRouter.get('/:id', authenticate, async (req: AuthenticatedRequest, res: 
     const result = await pool.query(
       `SELECT b.id, b.status, b.start_date, b.end_date, b.guests,
               b.total_amount, b.currency, b.notes, b.created_at, b.updated_at,
-              o.id AS operator_id, o.business_name, o.category, o.region, o.address,
-              t.first_name, t.last_name, u.email AS traveler_email
+              o.id AS operator_id, o.user_id AS operator_user_id, o.business_name, o.category, o.region, o.address,
+              t.user_id AS traveler_user_id, t.first_name, t.last_name, u.email AS traveler_email
        FROM bookings b
        JOIN operators o ON o.id = b.operator_id
        JOIN travelers t ON t.id = b.traveler_id
@@ -142,9 +152,9 @@ bookingsRouter.get('/:id', authenticate, async (req: AuthenticatedRequest, res: 
 
     const booking = result.rows[0];
 
-    // Only the traveler or the operator involved can view it
-    const isTraveler = req.user!.role === 'traveler' && booking.traveler_email === req.user!.email;
-    const isOperator = req.user!.role === 'operator';
+    // Only the traveler or the operator involved can view it - use ID not email
+    const isTraveler = req.user!.role === 'traveler' && booking.traveler_user_id === req.user!.id;
+    const isOperator = req.user!.role === 'operator' && booking.operator_user_id === req.user!.id;
 
     if (!isTraveler && !isOperator) {
       return res.status(403).json({ message: 'Forbidden' });

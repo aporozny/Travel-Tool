@@ -8,14 +8,27 @@ import { redis } from '../utils/redis';
 
 export const authRouter = Router();
 
+const COMMON_PASSWORDS = new Set([
+  'password', 'password1', 'password123', '12345678', '123456789',
+  'qwerty123', 'iloveyou', 'admin123', 'letmein1', 'welcome1',
+]);
+
 const registerSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(8),
+  email: z.string().email().toLowerCase(),
+  password: z.string().min(8).max(100),
   role: z.enum(['traveler', 'operator']),
+}).superRefine((data, ctx) => {
+  const lower = data.password.toLowerCase();
+  if (COMMON_PASSWORDS.has(lower)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['password'], message: 'Password is too common. Choose something more unique.' });
+  }
+  if (lower.includes(data.email.split('@')[0])) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['password'], message: 'Password cannot contain your email address.' });
+  }
 });
 
 const loginSchema = z.object({
-  email: z.string().email(),
+  email: z.string().email().toLowerCase(),
   password: z.string(),
 });
 
@@ -35,38 +48,39 @@ function generateTokens(userId: string, email: string, role: string) {
 
 // POST /api/v1/auth/register
 authRouter.post('/register', async (req: Request, res: Response) => {
+  const client = await pool.connect();
   try {
     const body = registerSchema.parse(req.body);
 
-    // Check if email already exists
-    const existing = await pool.query(
+    await client.query('BEGIN');
+
+    const existing = await client.query(
       'SELECT id FROM users WHERE email = $1',
       [body.email]
     );
     if (existing.rows.length > 0) {
+      await client.query('ROLLBACK');
       return res.status(409).json({ message: 'Email already registered' });
     }
 
     const passwordHash = await bcrypt.hash(body.password, 12);
     const userId = uuidv4();
 
-    // Create user
-    await pool.query(
+    await client.query(
       'INSERT INTO users (id, email, password_hash, role) VALUES ($1, $2, $3, $4)',
       [userId, body.email, passwordHash, body.role]
     );
 
-    // Create profile record
     if (body.role === 'traveler') {
-      await pool.query(
+      await client.query(
         'INSERT INTO travelers (id, user_id) VALUES ($1, $2)',
         [uuidv4(), userId]
       );
     }
 
-    const { accessToken, refreshToken } = generateTokens(userId, body.email, body.role);
+    await client.query('COMMIT');
 
-    // Store refresh token in Redis (7 days)
+    const { accessToken, refreshToken } = generateTokens(userId, body.email, body.role);
     await redis.setex(`refresh:${userId}`, 60 * 60 * 24 * 7, refreshToken);
 
     return res.status(201).json({
@@ -75,11 +89,14 @@ authRouter.post('/register', async (req: Request, res: Response) => {
       refreshToken,
     });
   } catch (err) {
+    await client.query('ROLLBACK');
     if (err instanceof z.ZodError) {
       return res.status(400).json({ message: 'Validation error', errors: err.errors });
     }
     console.error(err);
     return res.status(500).json({ message: 'Internal server error' });
+  } finally {
+    client.release();
   }
 });
 
@@ -93,19 +110,17 @@ authRouter.post('/login', async (req: Request, res: Response) => {
       [body.email]
     );
 
-    if (result.rows.length === 0) {
+    // Always run bcrypt even if user not found to prevent timing attacks
+    const dummyHash = '$2a$12$dummy.hash.to.prevent.timing.attacks.padding.here';
+    const hash = result.rows[0]?.password_hash || dummyHash;
+    const valid = await bcrypt.compare(body.password, hash);
+
+    if (result.rows.length === 0 || !valid) {
       return res.status(401).json({ message: 'Invalid email or password' });
     }
 
     const user = result.rows[0];
-    const valid = await bcrypt.compare(body.password, user.password_hash);
-
-    if (!valid) {
-      return res.status(401).json({ message: 'Invalid email or password' });
-    }
-
     const { accessToken, refreshToken } = generateTokens(user.id, user.email, user.role);
-
     await redis.setex(`refresh:${user.id}`, 60 * 60 * 24 * 7, refreshToken);
 
     return res.json({
@@ -130,6 +145,7 @@ authRouter.post('/refresh', async (req: Request, res: Response) => {
       return res.status(400).json({ message: 'Refresh token required' });
     }
 
+    // Verify signature before trusting payload
     const decoded = jwt.verify(
       refreshToken,
       process.env.JWT_REFRESH_SECRET as string
@@ -144,14 +160,12 @@ authRouter.post('/refresh', async (req: Request, res: Response) => {
       'SELECT id, email, role FROM users WHERE id = $1 AND is_active = true',
       [decoded.id]
     );
-
     if (userResult.rows.length === 0) {
       return res.status(401).json({ message: 'User not found' });
     }
 
     const user = userResult.rows[0];
     const { accessToken, refreshToken: newRefreshToken } = generateTokens(user.id, user.email, user.role);
-
     await redis.setex(`refresh:${user.id}`, 60 * 60 * 24 * 7, newRefreshToken);
 
     return res.json({ accessToken, refreshToken: newRefreshToken });
@@ -165,9 +179,15 @@ authRouter.post('/logout', async (req: Request, res: Response) => {
   try {
     const { refreshToken } = req.body;
     if (refreshToken) {
-      const decoded = jwt.decode(refreshToken) as { id: string } | null;
-      if (decoded?.id) {
+      // Use verify not decode to prevent crafted payloads
+      try {
+        const decoded = jwt.verify(
+          refreshToken,
+          process.env.JWT_REFRESH_SECRET as string
+        ) as { id: string };
         await redis.del(`refresh:${decoded.id}`);
+      } catch {
+        // Token invalid - that's fine, just ignore
       }
     }
     return res.status(204).send();

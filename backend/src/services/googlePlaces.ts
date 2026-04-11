@@ -9,7 +9,6 @@ const TYPE_MAP: Record<string, string> = {
   tourist_attraction: 'activity', amusement_park: 'activity',
   aquarium: 'activity', museum: 'activity', park: 'activity',
   spa: 'activity', gym: 'activity', travel_agency: 'activity',
-  scuba_diving: 'activity', surfing: 'activity',
   car_rental: 'transport', taxi_stand: 'transport',
 };
 
@@ -36,23 +35,20 @@ export interface PlaceResult {
   rating: number | null;
   review_count: number;
   price_level: number | null;
-  photos: string[];
+  photos: string[]; // photo references only, not full URLs
   opening_hours: any;
   tags: string[];
   raw_data: any;
 }
 
-// Use Text Search API (works with standard Places API key)
 export async function searchPlaces(query: string, region: string): Promise<PlaceResult[]> {
   if (!GOOGLE_API_KEY) throw new Error('GOOGLE_PLACES_API_KEY not set');
-
-  const searchQuery = `${query} ${region} Bali Indonesia`;
 
   const { data } = await axios.get(
     'https://maps.googleapis.com/maps/api/place/textsearch/json',
     {
       params: {
-        query: searchQuery,
+        query: `${query} ${region} Bali Indonesia`,
         key: GOOGLE_API_KEY,
         language: 'en',
         region: 'id',
@@ -61,7 +57,6 @@ export async function searchPlaces(query: string, region: string): Promise<Place
   );
 
   if (data.status === 'ZERO_RESULTS') return [];
-
   if (data.status !== 'OK') {
     throw new Error(`Google Places API error: ${data.status} - ${data.error_message || ''}`);
   }
@@ -73,7 +68,7 @@ export async function searchPlaces(query: string, region: string): Promise<Place
     category: mapCategory(place.types || []),
     description: null,
     address: place.formatted_address || null,
-    region: region,
+    region,
     country: 'Indonesia',
     latitude: place.geometry?.location?.lat || null,
     longitude: place.geometry?.location?.lng || null,
@@ -82,18 +77,20 @@ export async function searchPlaces(query: string, region: string): Promise<Place
     rating: place.rating || null,
     review_count: place.user_ratings_total || 0,
     price_level: place.price_level || null,
-    photos: (place.photos || []).slice(0, 5).map((p: any) =>
-      `https://maps.googleapis.com/maps/api/place/photo?maxwidth=800&photo_reference=${p.photo_reference}&key=${GOOGLE_API_KEY}`
-    ),
+    // Store only photo references, not full URLs with API key
+    photos: (place.photos || []).slice(0, 5).map((p: any) => p.photo_reference),
     opening_hours: place.opening_hours || null,
     tags: (place.types || []).filter((t: string) =>
       !['point_of_interest', 'establishment'].includes(t)
     ),
-    raw_data: place,
+    raw_data: {
+      place_id: place.place_id,
+      types: place.types,
+      name: place.name,
+    }, // stripped raw_data - no need to store full response
   }));
 }
 
-// Get full details for a single place
 export async function getPlaceDetails(placeId: string): Promise<Partial<PlaceResult>> {
   if (!GOOGLE_API_KEY) throw new Error('GOOGLE_PLACES_API_KEY not set');
 
@@ -109,9 +106,7 @@ export async function getPlaceDetails(placeId: string): Promise<Partial<PlaceRes
     }
   );
 
-  if (data.status !== 'OK') {
-    throw new Error(`Google Place Details error: ${data.status}`);
-  }
+  if (data.status !== 'OK') throw new Error(`Google Place Details error: ${data.status}`);
 
   const r = data.result;
   const sublocality = (r.address_components || []).find((c: any) =>
@@ -124,5 +119,26 @@ export async function getPlaceDetails(placeId: string): Promise<Partial<PlaceRes
     description: r.editorial_summary?.overview || null,
     opening_hours: r.opening_hours || null,
     region: sublocality?.long_name || null,
+  };
+}
+
+// Proxy: fetch photo from Google using reference, return buffer
+export async function fetchPhotoBuffer(
+  photoReference: string,
+  maxWidth = 800
+): Promise<{ data: Buffer; contentType: string }> {
+  if (!GOOGLE_API_KEY) throw new Error('GOOGLE_PLACES_API_KEY not set');
+
+  const response = await axios.get(
+    'https://maps.googleapis.com/maps/api/place/photo',
+    {
+      params: { maxwidth: maxWidth, photo_reference: photoReference, key: GOOGLE_API_KEY },
+      responseType: 'arraybuffer',
+    }
+  );
+
+  return {
+    data: Buffer.from(response.data),
+    contentType: response.headers['content-type'] || 'image/jpeg',
   };
 }

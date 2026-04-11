@@ -164,32 +164,38 @@ operatorsRouter.post('/', authenticate, async (req: AuthenticatedRequest, res: R
 
 // PATCH /api/v1/operators/:id
 // Auth required, must own the operator record
+const OPERATOR_UPDATABLE_FIELDS = [
+  'business_name', 'description', 'category', 'website',
+  'phone', 'address', 'region', 'country',
+] as const;
+
 operatorsRouter.patch('/:id', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    // Verify ownership
     const ownership = await pool.query(
       'SELECT id FROM operators WHERE id = $1 AND user_id = $2',
       [req.params.id, req.user!.id]
     );
-
     if (ownership.rows.length === 0) {
       return res.status(404).json({ message: 'Operator not found or not yours' });
     }
 
     const body = updateOperatorSchema.parse(req.body);
-    const { latitude, longitude, ...rest } = body; // latitude/longitude handled via ST_MakePoint below
+    const { latitude, longitude } = body;
 
-    const fields = Object.entries(rest).filter(([, v]) => v !== undefined);
+    // Only allow explicitly whitelisted fields - never let user input become column names
+    const updates: { col: string; val: any }[] = OPERATOR_UPDATABLE_FIELDS
+      .filter(f => body[f] !== undefined)
+      .map(f => ({ col: f, val: body[f] }));
 
-    if (fields.length === 0 && !latitude && !longitude) {
+    if (updates.length === 0 && !latitude && !longitude) {
       return res.status(400).json({ message: 'No fields to update' });
     }
 
-    let setClause = fields.map(([k], i) => `${k} = $${i + 1}`).join(', ');
-    const values: any[] = fields.map(([, v]) => v);
+    const values: any[] = updates.map(u => u.val);
+    let setClause = updates.map((u, i) => `${u.col} = $${i + 1}`).join(', ');
     let paramCount = values.length + 1;
 
-    if (latitude && longitude) {
+    if (latitude !== undefined && longitude !== undefined) {
       setClause += `${setClause ? ', ' : ''}location = ST_MakePoint($${paramCount}, $${paramCount + 1})`;
       values.push(longitude, latitude);
       paramCount += 2;
