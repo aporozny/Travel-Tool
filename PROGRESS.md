@@ -60,3 +60,9 @@
 
 ## API Base URL
 http://localhost:5000/api/v1
+
+## CI Status
+- CI fixed and pushed (commit 65cf61a)
+- Fixed: package-lock.json added, schema migration step in workflow, forceExit in jest, eslint flat config, index.ts no longer auto-listens on import
+- Tests: 16 passing (health, auth x8, operators x5)
+- GitHub PAT updated with workflow scope
