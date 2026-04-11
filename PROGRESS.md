@@ -155,3 +155,30 @@ PGPASSWORD=traveller psql -U traveller -d traveller_dev -h localhost -f /home/tr
 Build the multi-step onboarding experience in the web app.
 9 steps matching the 9 preference categories.
 Should feel like a conversation, not a form.
+
+## Onboarding flow live
+- 9-step onboarding covers all 49 preference dimensions
+- Card-based selection (no dropdowns), feels conversational
+- Each step saves independently via PATCH /travelers/me/preferences
+- Progress tracked: onboarding_step increments each save
+- On completion: onboarding_completed = true, redirects to main app
+- New travelers see onboarding automatically after register
+- Existing travelers who completed skip directly to app
+- Preferences confirmed saving correctly in production
+
+## Current state summary
+Backend: Complete (auth, travelers, operators, bookings, safety, reviews, search, dashboard, photos)
+Database: 14 tables, PostGIS, GIN indexes, triggers, 2 migrations applied
+Preferences: 49 dimensions across 9 categories, fully live
+Web app: Login/register, onboarding, explore, bookings, safety, profile, operator dashboard
+Mobile: React Native scaffold (all screens, navigation, Redux) - not yet deployed to devices
+Search: Google Places cache working, 7-day staleness, bulk insert, photo proxy
+Security: Rate limiting, transactions, field whitelists, timing attack prevention
+
+## Next priorities (deep dive approach)
+1. Recommendation engine - use preferences to surface relevant operators/content
+2. Public landing page - sell the community before asking for signup
+3. Member directory - find other members with similar preferences
+4. Seed data - run Google Places ingestion across all key Indonesian regions
+5. Operator claim flow - polish the web UI for operators to claim listings
+6. Mobile deployment - TestFlight (iOS) and Play Store beta (Android)
