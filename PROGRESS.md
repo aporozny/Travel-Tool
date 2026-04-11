@@ -110,3 +110,32 @@ http://localhost:5000/api/v1
 - SendGrid/Twilio for real email/SMS notifications
 - Wire search results into Explore screen in web app
 - Operator dashboard accessible from web (operators land on dashboard tab automatically - done)
+
+## Audit fixes applied (commit 51d8d64)
+
+### Security
+- Rate limiting: auth 10/15min, search 60/min, API 300/min
+- Google API key no longer exposed in photo URLs - photo proxy at /api/v1/photos
+- Logout now uses jwt.verify not jwt.decode (prevents crafted payload attacks)
+- Operator PATCH now whitelists fields explicitly - cannot inject column names
+- Booking GET/:id uses ID comparison not email for access control
+- express.json limited to 10kb to prevent large payload attacks
+- trust proxy enabled for correct IP detection behind nginx
+
+### Data integrity
+- Register wrapped in DB transaction - no orphaned users on failure
+- Login uses dummy hash when user not found - prevents timing attacks
+- Booking create validates dates (no past dates, end > start)
+- authenticate middleware now verifies user is still active on every request
+- Added optionalAuth middleware for public routes that can be personalized
+
+### Performance
+- Search cache: bulk INSERT (1 round trip vs N)
+- Search cache: stale threshold 7 days not 24 hours
+- New indexes: bookings(traveler_id,status), (operator_id,status), (start_date), (created_at)
+- New index: users(email) WHERE is_active = true
+- places_cache raw_data stripped - saves significant storage
+- search_queries unique index fixed for NULL category handling
+
+### To run migration on VPS
+PGPASSWORD=traveller psql -U traveller -d traveller_dev -h localhost -f /home/travel-tool/backend/src/utils/migrations/001_audit_fixes.sql
