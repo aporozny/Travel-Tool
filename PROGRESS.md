@@ -60,3 +60,18 @@
 
 ## API Base URL
 http://localhost:5000/api/v1
+
+## Infrastructure
+- nginx 1.24 installed, serving web app at port 80
+- nginx proxies /api/ and /health to backend at port 5000
+- Static files in /var/www/travel-tool/
+- nginx config: /etc/nginx/sites-available/travel-tool
+- Deploy script: /home/travel-tool/deploy.sh (git pull + build + copy + pm2 restart + nginx reload)
+- Currently accessible at: http://21.0.1.58 (internal IP - need public IP from Binary Lane panel)
+
+## When you get a domain
+1. Point A record to the public IP
+2. Update nginx server_name from _ to yourdomain.com
+3. Install certbot: apt install certbot python3-certbot-nginx
+4. Run: certbot --nginx -d yourdomain.com
+5. SSL is automatic, certbot auto-renews
