@@ -75,3 +75,14 @@ http://localhost:5000/api/v1
 3. Install certbot: apt install certbot python3-certbot-nginx
 4. Run: certbot --nginx -d yourdomain.com
 5. SSL is automatic, certbot auto-renews
+
+## Search & Cache System
+- 3 new DB tables: places_cache, search_queries, listing_claims
+- Google Places API key in backend/.env (never committed)
+- GET /api/v1/search?q=&region=&category=&limit= - cache-first, falls back to Google
+- GET /api/v1/search/places/:id - single place detail (enriches from Google in background)
+- POST /api/v1/search/places/:id/claim - operator submits claim
+- GET /api/v1/search/claims - operator views their claims
+- PATCH /api/v1/search/claims/:id - admin approves/rejects
+- Note: outbound Google API calls blocked in Claude sandbox - works on real VPS
+- To test on VPS: curl "http://21.0.1.58/api/v1/search?q=diving&region=Nusa+Penida"
