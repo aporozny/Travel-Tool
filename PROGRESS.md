@@ -86,3 +86,12 @@ http://localhost:5000/api/v1
 - PATCH /api/v1/search/claims/:id - admin approves/rejects
 - Note: outbound Google API calls blocked in Claude sandbox - works on real VPS
 - To test on VPS: curl "http://21.0.1.58/api/v1/search?q=diving&region=Nusa+Penida"
+
+## Deployment (Live)
+- Server: Proxmox VM on local hardware
+- Internal IP: 172.16.128.83
+- Tailscale IP: 100.67.86.49 (access via this)
+- Web app: http://100.67.86.49
+- API: http://100.67.86.49/api/v1
+- Web app API URL hardcoded to http://100.67.86.49/api/v1 (update when domain acquired)
+- Google Places API: needs Places API enabled in Google Cloud Console
