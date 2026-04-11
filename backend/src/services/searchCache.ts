@@ -74,7 +74,8 @@ async function getPlacesFromCache(query: string, region: string, category?: stri
        AND pc.region ILIKE $1
        AND ($2::text IS NULL OR pc.category = $2)
        AND (
-         pc.name ILIKE $3
+         $3 = '%%'
+         OR pc.name ILIKE $3
          OR pc.description ILIKE $3
          OR pc.tags && ARRAY[$4]
        )
