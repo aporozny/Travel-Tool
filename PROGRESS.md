@@ -139,3 +139,19 @@ http://localhost:5000/api/v1
 
 ### To run migration on VPS
 PGPASSWORD=traveller psql -U traveller -d traveller_dev -h localhost -f /home/travel-tool/backend/src/utils/migrations/001_audit_fixes.sql
+
+## Member preferences schema live (migration 002)
+- Old traveler_preferences table dropped and replaced with member_preferences
+- 49 dimensions across 9 categories, all typed and indexed
+- GIN indexes on array columns for operator matching queries
+- Trigger auto-creates preference record when traveler is created
+- New endpoints:
+  - GET /travelers/me/preferences - full preference profile
+  - PATCH /travelers/me/preferences - partial update (onboarding step by step)
+  - GET /travelers/me/onboarding-status - progress tracking
+- Onboarding tracking built in: onboarding_step (0-10), onboarding_completed bool
+
+## Next: Onboarding flow
+Build the multi-step onboarding experience in the web app.
+9 steps matching the 9 preference categories.
+Should feel like a conversation, not a form.
