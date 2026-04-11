@@ -184,9 +184,11 @@ travelersRouter.patch('/me/preferences', authenticate, async (req: Authenticated
 
     setClauses.push(`updated_at = NOW()`);
 
+    // Row always exists (created by trigger on traveler insert)
+    // Use INSERT ... ON CONFLICT to handle edge cases
     const result = await pool.query(
-      `INSERT INTO member_preferences (id, traveler_id, ${[...ARRAY_PREF_FIELDS, ...SCALAR_PREF_FIELDS].slice(0,1).join('')})
-       VALUES (gen_random_uuid(), $${paramCount}, DEFAULT)
+      `INSERT INTO member_preferences (id, traveler_id)
+       VALUES (gen_random_uuid(), $${paramCount})
        ON CONFLICT (traveler_id) DO UPDATE SET ${setClauses.join(', ')}
        RETURNING *`,
       [...values, travelerId]
