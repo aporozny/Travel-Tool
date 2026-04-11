@@ -152,3 +152,74 @@ CREATE INDEX idx_location_history_expires_at ON location_history(expires_at);
 
 -- Auto-cleanup expired locations
 -- Run via cron or pg_cron: DELETE FROM location_history WHERE expires_at < NOW();
+
+-- --------------------------------------------------------
+-- Search cache and claims (added after initial schema)
+-- --------------------------------------------------------
+
+-- Cached listings from external sources
+CREATE TABLE IF NOT EXISTS places_cache (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  external_id VARCHAR(255) NOT NULL,        -- Google place_id, Viator product code etc
+  source VARCHAR(50) NOT NULL,              -- 'google', 'viator', 'manual'
+  name VARCHAR(255) NOT NULL,
+  category VARCHAR(50),                     -- 'restaurant', 'activity', 'accommodation', 'transport'
+  description TEXT,
+  address TEXT,
+  region VARCHAR(100),
+  country VARCHAR(50) DEFAULT 'Indonesia',
+  latitude DECIMAL(10, 7),
+  longitude DECIMAL(10, 7),
+  phone VARCHAR(50),
+  website VARCHAR(500),
+  rating DECIMAL(3, 1),
+  review_count INTEGER DEFAULT 0,
+  price_level INTEGER,                      -- 1-4 ($ to $$$$)
+  photos JSONB DEFAULT '[]',               -- array of photo URLs
+  opening_hours JSONB,                      -- structured hours
+  tags TEXT[],
+  raw_data JSONB,                          -- full API response stored for reference
+  is_claimed BOOLEAN DEFAULT false,
+  claimed_by UUID REFERENCES users(id),
+  claimed_at TIMESTAMPTZ,
+  operator_id UUID REFERENCES operators(id), -- linked once claimed and verified
+  last_fetched_at TIMESTAMPTZ DEFAULT NOW(),
+  expires_at TIMESTAMPTZ DEFAULT NOW() + INTERVAL '30 days',
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(external_id, source)
+);
+
+-- Search query cache - tracks what has been searched so we know what to refresh
+CREATE TABLE IF NOT EXISTS search_queries (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  query TEXT NOT NULL,
+  region VARCHAR(100),
+  category VARCHAR(50),
+  result_count INTEGER DEFAULT 0,
+  last_searched_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(query, region, category)
+);
+
+-- Operator listing claims
+CREATE TABLE IF NOT EXISTS listing_claims (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  place_cache_id UUID NOT NULL REFERENCES places_cache(id),
+  operator_id UUID NOT NULL REFERENCES operators(id),
+  status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+  evidence TEXT,                           -- operator's description of why they own it
+  reviewed_by UUID REFERENCES users(id),
+  reviewed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Indexes
+CREATE INDEX IF NOT EXISTS idx_places_cache_region ON places_cache(region);
+CREATE INDEX IF NOT EXISTS idx_places_cache_category ON places_cache(category);
+CREATE INDEX IF NOT EXISTS idx_places_cache_source ON places_cache(source);
+CREATE INDEX IF NOT EXISTS idx_places_cache_expires ON places_cache(expires_at);
+CREATE INDEX IF NOT EXISTS idx_places_cache_claimed ON places_cache(is_claimed);
+CREATE INDEX IF NOT EXISTS idx_places_cache_location ON places_cache USING GIST(
+  ST_MakePoint(longitude, latitude)
+) WHERE longitude IS NOT NULL AND latitude IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_search_queries_query ON search_queries(query, region, category);
+CREATE INDEX IF NOT EXISTS idx_listing_claims_status ON listing_claims(status);

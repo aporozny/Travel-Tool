@@ -13,6 +13,7 @@ import { operatorsRouter } from './routes/operators';
 import { bookingsRouter } from './routes/bookings';
 import { safetyRouter } from './routes/safety';
 import { reviewsRouter } from './routes/reviews';
+import { searchRouter } from './routes/search';
 import { errorHandler } from './middleware/errorHandler';
 import { notFound } from './middleware/notFound';
 
@@ -30,6 +31,7 @@ app.use('/api/v1/operators', operatorsRouter);
 app.use('/api/v1/bookings', bookingsRouter);
 app.use('/api/v1/safety', safetyRouter);
 app.use('/api/v1/reviews', reviewsRouter);
+app.use('/api/v1/search', searchRouter);
 
 app.use(notFound);
 app.use(errorHandler);
