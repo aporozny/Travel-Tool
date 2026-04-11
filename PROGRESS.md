@@ -95,3 +95,18 @@ http://localhost:5000/api/v1
 - API: http://100.67.86.49/api/v1
 - Web app API URL hardcoded to http://100.67.86.49/api/v1 (update when domain acquired)
 - Google Places API: needs Places API enabled in Google Cloud Console
+
+## Status as of latest session
+- All systems operational on VPS (Proxmox VM, Tailscale IP: 100.67.86.49)
+- Google Places API working - 20 results for Seminyak restaurants confirmed
+- Search cache working - first call hits Google, subsequent calls served from DB
+- Operator dashboard working (overview, bookings, reviews, analytics)
+- Notifications service wired into SOS (logs to console, ready for SendGrid/Twilio)
+- Web app deployed with new bundle (dashboard screen for operators, explore for travelers)
+
+## What still needs doing
+- Tailwind CSS (restyle web app)
+- Domain + SSL (when domain acquired)
+- SendGrid/Twilio for real email/SMS notifications
+- Wire search results into Explore screen in web app
+- Operator dashboard accessible from web (operators land on dashboard tab automatically - done)
