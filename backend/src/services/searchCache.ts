@@ -76,7 +76,7 @@ async function getPlacesFromCache(query: string, region: string, category?: stri
      ORDER BY pc.is_claimed DESC, pc.rating DESC NULLS LAST
      LIMIT $3`,
     [
-      \`%\${region}%\`,
+      `%${region}%`,
       category || null,
       limit,
     ]
