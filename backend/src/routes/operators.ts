@@ -177,7 +177,7 @@ operatorsRouter.patch('/:id', authenticate, async (req: AuthenticatedRequest, re
     }
 
     const body = updateOperatorSchema.parse(req.body);
-    const { latitude, longitude, ...rest } = body;
+    const { latitude, longitude, ...rest } = body; // latitude/longitude handled via ST_MakePoint below
 
     const fields = Object.entries(rest).filter(([, v]) => v !== undefined);
 

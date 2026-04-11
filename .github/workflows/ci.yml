@@ -44,6 +44,14 @@ jobs:
       - name: Install dependencies
         run: cd backend && npm ci
 
+      - name: Apply database schema
+        run: |
+          PGPASSWORD=traveller psql \
+            -h localhost -U traveller -d traveller_test \
+            -f backend/src/utils/schema.sql
+        env:
+          PGPASSWORD: traveller
+
       - name: Lint
         run: cd backend && npm run lint
 
