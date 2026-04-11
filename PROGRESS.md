@@ -16,53 +16,47 @@
 - Backend: Node.js, Express, TypeScript
 - Database: PostgreSQL + PostGIS
 - Cache/Sessions: Redis
-- Auth: JWT (access 15m) + refresh tokens (7d, stored in Redis)
+- Auth: JWT (access 15m) + refresh tokens (7d)
 - Mobile: React Native 0.75 (iOS + Android) - COMPLETE
-- Web wrapper: React Native Web (next)
+- Web: React + webpack + TypeScript - COMPLETE
+- GitHub PAT (workflow+repo scope) stored in remote URL
 
 ## Completed
 - [x] Full backend API (auth, travelers, operators, bookings, safety, reviews)
 - [x] Database schema (11 tables, PostGIS)
-- [x] CI workflow, PM2, Postgres, Redis on boot
+- [x] CI workflow (green, 16 tests passing)
 - [x] Mobile app - React Native 0.75
-  - [x] Auth screens (Login, Register)
-  - [x] Home screen (operator discovery)
-  - [x] Operator detail screen (reviews, ratings, book button)
-  - [x] Bookings screen (list with status badges)
-  - [x] Create booking screen (date, guests, notes)
-  - [x] Safety screen (SOS, location sharing, contacts list)
-  - [x] Add contact screen (name, email, phone, permissions toggles)
-  - [x] Profile screen (edit profile, budget/activity/style preferences as chips)
-  - [x] Full navigation (4 tab bars, nested stacks)
-  - [x] Redux store (auth slice)
-  - [x] Axios API service (JWT + auto token refresh)
-  - [x] TypeScript types for all entities
+  - Auth, Home, Operator detail, Bookings, Create booking
+  - Safety (SOS, location, contacts), Add contact, Profile
+  - Redux store, Axios JWT client, TypeScript types
+- [x] Web app - React + webpack
+  - Login/Register screen
+  - Sidebar shell (Explore, Bookings, Safety, Profile tabs)
+  - Explore: operator grid, search, category filter
+  - Bookings: list with status badges
+  - Safety: SOS button, emergency contacts list
+  - Profile: edit profile, budget/activity/style preference chips
+  - localStorage token management, auto token refresh
 
 ## In Progress
-- [ ] Web wrapper (React Native Web)
-  - Single codebase serves mobile app AND browser
-  - Add react-native-web, webpack config, index.html entry point
+- [ ] Expose the API publicly (nginx reverse proxy + SSL)
 
 ## Up Next
+- [ ] Nginx config + SSL (Let's Encrypt) so web app is accessible at a domain
 - [ ] Notification service for SOS (SendGrid/Twilio)
 - [ ] Admin routes (verify operators, manage tiers)
+- [ ] Operator dashboard (manage listings, view bookings, analytics)
 - [ ] Payment integration (Stripe)
-- [ ] Operator dashboard (manage listings, view bookings)
 
-## Mobile app location
-/home/travel-tool/mobile/app/
+## To run web locally (developer machine)
+1. cd web && npm install
+2. npm start → http://localhost:3000
+3. Backend must be running on port 5000
 
 ## To run mobile locally (developer machine)
-1. npm install (in mobile/app)
+1. cd mobile/app && npm install
 2. iOS: cd ios && pod install && cd .. && npm run ios
 3. Android: npm run android
-4. API URL in src/services/api.ts: 10.0.2.2 for Android emulator, localhost for iOS simulator
 
 ## API Base URL
 http://localhost:5000/api/v1
-
-## CI Status
-- CI fixed and pushed (commit 65cf61a)
-- Fixed: package-lock.json added, schema migration step in workflow, forceExit in jest, eslint flat config, index.ts no longer auto-listens on import
-- Tests: 16 passing (health, auth x8, operators x5)
-- GitHub PAT updated with workflow scope
