@@ -1,28 +1,16 @@
 import axios from 'axios';
 
 const GOOGLE_API_KEY = process.env.GOOGLE_PLACES_API_KEY;
-const BASE_URL = 'https://maps.googleapis.com/maps/api/place';
 
-// Map Google types to our categories
 const TYPE_MAP: Record<string, string> = {
-  restaurant: 'food',
-  food: 'food',
-  cafe: 'food',
-  bar: 'food',
-  meal_takeaway: 'food',
-  lodging: 'accommodation',
-  hotel: 'accommodation',
-  tourist_attraction: 'activity',
-  amusement_park: 'activity',
-  aquarium: 'activity',
-  museum: 'activity',
-  park: 'activity',
-  spa: 'activity',
-  gym: 'activity',
-  travel_agency: 'activity',
-  car_rental: 'transport',
-  taxi_stand: 'transport',
-  transit_station: 'transport',
+  restaurant: 'food', food: 'food', cafe: 'food', bar: 'food',
+  meal_takeaway: 'food', bakery: 'food',
+  lodging: 'accommodation', hotel: 'accommodation',
+  tourist_attraction: 'activity', amusement_park: 'activity',
+  aquarium: 'activity', museum: 'activity', park: 'activity',
+  spa: 'activity', gym: 'activity', travel_agency: 'activity',
+  scuba_diving: 'activity', surfing: 'activity',
+  car_rental: 'transport', taxi_stand: 'transport',
 };
 
 function mapCategory(types: string[]): string {
@@ -30,14 +18,6 @@ function mapCategory(types: string[]): string {
     if (TYPE_MAP[t]) return TYPE_MAP[t];
   }
   return 'activity';
-}
-
-function extractRegion(components: any[]): string {
-  const sublocality = components.find((c: any) =>
-    c.types.includes('sublocality') || c.types.includes('sublocality_level_1')
-  );
-  const locality = components.find((c: any) => c.types.includes('locality'));
-  return (sublocality || locality)?.long_name || 'Bali';
 }
 
 export interface PlaceResult {
@@ -62,21 +42,27 @@ export interface PlaceResult {
   raw_data: any;
 }
 
-// Text search - returns list of places
+// Use Text Search API (works with standard Places API key)
 export async function searchPlaces(query: string, region: string): Promise<PlaceResult[]> {
   if (!GOOGLE_API_KEY) throw new Error('GOOGLE_PLACES_API_KEY not set');
 
   const searchQuery = `${query} ${region} Bali Indonesia`;
 
-  const { data } = await axios.get(`${BASE_URL}/textsearch/json`, {
-    params: {
-      query: searchQuery,
-      key: GOOGLE_API_KEY,
-      language: 'en',
-    },
-  });
+  const { data } = await axios.get(
+    'https://maps.googleapis.com/maps/api/place/textsearch/json',
+    {
+      params: {
+        query: searchQuery,
+        key: GOOGLE_API_KEY,
+        language: 'en',
+        region: 'id',
+      },
+    }
+  );
 
-  if (data.status !== 'OK' && data.status !== 'ZERO_RESULTS') {
+  if (data.status === 'ZERO_RESULTS') return [];
+
+  if (data.status !== 'OK') {
     throw new Error(`Google Places API error: ${data.status} - ${data.error_message || ''}`);
   }
 
@@ -100,34 +86,43 @@ export async function searchPlaces(query: string, region: string): Promise<Place
       `https://maps.googleapis.com/maps/api/place/photo?maxwidth=800&photo_reference=${p.photo_reference}&key=${GOOGLE_API_KEY}`
     ),
     opening_hours: place.opening_hours || null,
-    tags: (place.types || []).filter((t: string) => !['point_of_interest', 'establishment'].includes(t)),
+    tags: (place.types || []).filter((t: string) =>
+      !['point_of_interest', 'establishment'].includes(t)
+    ),
     raw_data: place,
   }));
 }
 
-// Fetch full details for a single place
+// Get full details for a single place
 export async function getPlaceDetails(placeId: string): Promise<Partial<PlaceResult>> {
   if (!GOOGLE_API_KEY) throw new Error('GOOGLE_PLACES_API_KEY not set');
 
-  const { data } = await axios.get(`${BASE_URL}/details/json`, {
-    params: {
-      place_id: placeId,
-      fields: 'name,formatted_phone_number,website,opening_hours,address_components,editorial_summary,reviews',
-      key: GOOGLE_API_KEY,
-      language: 'en',
-    },
-  });
+  const { data } = await axios.get(
+    'https://maps.googleapis.com/maps/api/place/details/json',
+    {
+      params: {
+        place_id: placeId,
+        fields: 'formatted_phone_number,website,opening_hours,editorial_summary,address_components',
+        key: GOOGLE_API_KEY,
+        language: 'en',
+      },
+    }
+  );
 
   if (data.status !== 'OK') {
-    throw new Error(`Google Places Details error: ${data.status}`);
+    throw new Error(`Google Place Details error: ${data.status}`);
   }
 
   const r = data.result;
+  const sublocality = (r.address_components || []).find((c: any) =>
+    c.types.includes('sublocality') || c.types.includes('locality')
+  );
+
   return {
     phone: r.formatted_phone_number || null,
     website: r.website || null,
     description: r.editorial_summary?.overview || null,
     opening_hours: r.opening_hours || null,
-    region: extractRegion(r.address_components || []),
+    region: sublocality?.long_name || null,
   };
 }
