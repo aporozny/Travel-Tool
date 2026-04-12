@@ -1,34 +1,35 @@
 #!/bin/bash
-# Travel Tool deploy script
-# Run this whenever you want to push a new build live
+# Drift deploy script - run as root from /home/travel-tool
+# Usage: bash /home/travel-tool/deploy.sh
+
 set -e
-
-echo "=== Travel Tool Deploy ==="
-
-# Pull latest code
 cd /home/travel-tool
+
+echo "Deploying Drift..."
+
+# Pull latest
 git pull origin main
+echo "✓ Code updated"
 
-# Build web app
-echo "Building web app..."
-cd /home/travel-tool/web
-npm install --silent
-npm run build
+# Backend
+cd backend && npm install --silent
+pm2 restart travel-tool-api
+echo "✓ Backend restarted"
 
-# Copy to nginx root
-echo "Deploying to nginx..."
-rm -rf /var/www/travel-tool/*
-cp -r /home/travel-tool/web/dist/* /var/www/travel-tool/
-
-# Restart backend
-echo "Restarting backend..."
-cd /home/travel-tool/backend
-npm install --silent
-pm2 restart travel-tool-api || pm2 start "npx ts-node src/index.ts" --name "travel-tool-api"
-
-# Reload nginx (no downtime)
+# Web
+cd ../web && npm run build 2>&1 | grep -E "error|compiled|Done" | tail -3
+cp -r dist/* /var/www/travel-tool/
 nginx -s reload
+echo "✓ Frontend deployed"
 
-echo "=== Deploy complete ==="
-echo "Web: http://$(hostname -I | tr -d ' ')"
-echo "API: http://$(hostname -I | tr -d ' ')/health"
+# Health check
+sleep 5
+STATUS=$(curl -s http://localhost/health | python3 -c "import sys,json; print(json.load(sys.stdin)['status'])" 2>/dev/null)
+if [ "$STATUS" = "ok" ]; then
+  echo "✓ Health check passed"
+  curl -s http://localhost/health/stats | python3 -m json.tool
+else
+  echo "⚠ Health check failed - check pm2 logs"
+fi
+
+echo "Deploy complete."
