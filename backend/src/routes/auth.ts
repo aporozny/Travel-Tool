@@ -22,7 +22,7 @@ const registerSchema = z.object({
   if (COMMON_PASSWORDS.has(lower)) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['password'], message: 'Password is too common. Choose something more unique.' });
   }
-  if (lower.includes(data.email.split('@')[0])) {
+  if (lower.includes(data.email.toLowerCase())) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['password'], message: 'Password cannot contain your email address.' });
   }
 });
