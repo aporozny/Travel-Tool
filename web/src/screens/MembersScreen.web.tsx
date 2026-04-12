@@ -176,7 +176,7 @@ export default function MembersScreen() {
 
   const fetchConnections = useCallback(async () => {
     try {
-      const res = await api.get('/members/me/connections');
+      const res = await api.get('/members/my/connections');
       setConnections(res.data || []);
       setPendingCount((res.data || []).filter((c: any) => c.direction === 'received' && c.status === 'pending').length);
     } catch (err) { console.error(err); }

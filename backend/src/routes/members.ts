@@ -298,7 +298,7 @@ membersRouter.patch('/connections/:connectionId', authenticate, async (req: Auth
 
 // GET /api/v1/members/me/connections
 // Get my connections and pending requests
-membersRouter.get('/me/connections', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+membersRouter.get('/my/connections', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const result = await pool.query(
       `SELECT

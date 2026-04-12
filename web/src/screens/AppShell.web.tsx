@@ -3,6 +3,7 @@ import { useDispatch, useSelector } from 'react-redux';
 import { logout } from '../store/authSlice.web';
 import { AppDispatch, RootState } from '../store';
 import ExploreScreen from './ExploreScreen.web';
+import api from '../services/api.web';
 import BookingsScreen from './BookingsScreen.web';
 import SafetyScreen from './SafetyScreen.web';
 import ProfileScreen from './ProfileScreen.web';
@@ -16,10 +17,21 @@ export default function AppShell() {
   const { user } = useSelector((s: RootState) => s.auth);
   const [tab, setTab] = useState<Tab>(user?.role === 'operator' ? 'dashboard' : 'explore');
   const [detail, setDetail] = useState<any>(null);
+  const [pendingConnections, setPendingConnections] = useState(0);
+
+  // Check for pending connection requests on load
+  React.useEffect(() => {
+    if (user?.role !== 'traveler') return;
+    api.get('/members/my/connections')
+      .then(r => {
+        const pending = (r.data || []).filter((c: any) => c.direction === 'received' && c.status === 'pending').length;
+        setPendingConnections(pending);
+      }).catch(() => {});
+  }, [user]);
 
   const isOperator = user?.role === 'operator';
 
-  const NAV_ITEMS: { key: Tab; label: string; icon: string }[] = isOperator
+  const NAV_ITEMS: { key: Tab; label: string; icon: string; badge?: number }[] = isOperator
     ? [
         { key: 'dashboard', label: 'Dashboard', icon: '📊' },
         { key: 'bookings', label: 'Bookings', icon: '📋' },
@@ -27,7 +39,7 @@ export default function AppShell() {
       ]
     : [
         { key: 'explore', label: 'Explore', icon: '🗺' },
-        { key: 'members', label: 'Members', icon: '👥' },
+        { key: 'members', label: 'Members', icon: '👥', badge: pendingConnections },
         { key: 'bookings', label: 'Bookings', icon: '📋' },
         { key: 'safety', label: 'Safety', icon: '🛡' },
         { key: 'profile', label: 'Profile', icon: '👤' },
@@ -61,6 +73,7 @@ export default function AppShell() {
               onClick={() => { setTab(item.key); setDetail(null); }}>
               <span style={styles.navIcon}>{item.icon}</span>
               <span>{item.label}</span>
+              {item.badge ? <span style={{ background: '#c62828', color: '#fff', borderRadius: 10, padding: '1px 6px', fontSize: 10, marginLeft: 'auto', fontWeight: 700 }}>{item.badge}</span> : null}
             </button>
           ))}
         </nav>
