@@ -47,7 +47,7 @@ export default function LandingScreen({ onJoin, onLogin }: Props) {
       .then(data => {
         setStats({
           members: data.members > 0 ? data.members.toString() : '—',
-          operators: (data.operators + data.places).toString(),
+          operators: (parseInt(data.operators) + parseInt(data.places)).toString(),
           regions: data.regions > 1 ? data.regions.toString() : 'Bali',
         });
       }).catch(() => {});
@@ -140,17 +140,17 @@ export default function LandingScreen({ onJoin, onLogin }: Props) {
           <h2 style={s.sectionTitle}>What makes Drift different</h2>
           <div style={vp.grid}>
             <ValueProp
-              icon="◎"
+              icon="01"
               title="Preference-matched"
               body="Tell us how you travel — your budget, activities, dietary needs, pace. We surface operators that actually fit. Not the most popular. The most relevant to you."
             />
             <ValueProp
-              icon="◈"
+              icon="02"
               title="Community-vetted"
               body="Every recommendation comes from people who've been there. Members share real trip reports, ask real questions, and connect with operators who respond."
             />
             <ValueProp
-              icon="◇"
+              icon="03"
               title="No sponsored results"
               body="Drift is ad-free. Operators are listed on merit and member feedback. The best operators rise to the top because they're genuinely good, not because they paid more."
             />
