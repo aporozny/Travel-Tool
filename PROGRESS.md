@@ -213,3 +213,27 @@ Priority 4: bulk ingest Google Places across all key Indonesian regions
 Regions to seed: Seminyak, Canggu, Ubud, Uluwatu, Nusa Penida, Amed, Sanur,
   Lombok, Gili Islands, Flores, Labuan Bajo, Raja Ampat
 Categories per region: restaurants, accommodation, activities, diving
+
+## Session end state (Apr 12 2026)
+
+### What's live and working
+- Drift landing page at http://100.67.86.49
+- 8 test members seeded (password: DriftTest2026!)
+- 776 places across 12 Indonesian regions
+- Recommendation engine personalised
+- Member directory with connections
+- Deploy: bash /home/travel-tool/deploy.sh
+- Watchdog: crontab running every 5 min
+- andre user has drift-* aliases in ~/.bashrc
+
+### Immediate next steps
+1. Debug Sarah login 401 (test: curl -X POST http://localhost/api/v1/auth/login -H 'Content-Type: application/json' -d '{"email":"sarah.chen@drifttest.com","password":"DriftTest2026!"}')
+2. Fix EADDRINUSE on deploy (pm2 restart kills old process but timing issue)
+3. Operator claim flow UI
+4. Mobile TestFlight/Play Store
+5. Domain + SSL
+
+### Known issues
+- nginx goes down occasionally - watchdog handles it
+- Must be root to run pm2/nginx directly (andre has aliases)
+- Port 5000 EADDRINUSE on rapid restarts - add sleep to deploy.sh
