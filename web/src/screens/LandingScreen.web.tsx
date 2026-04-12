@@ -42,7 +42,7 @@ export default function LandingScreen({ onJoin, onLogin }: Props) {
   const [stats, setStats] = useState({ members: '—', operators: '—', regions: '—' });
 
   useEffect(() => {
-    fetch('/api/v1/health/stats')
+    fetch('/health/stats')
       .then(r => r.json())
       .then(data => {
         setStats({
