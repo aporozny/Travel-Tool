@@ -42,19 +42,14 @@ export default function LandingScreen({ onJoin, onLogin }: Props) {
   const [stats, setStats] = useState({ members: '—', operators: '—', regions: '—' });
 
   useEffect(() => {
-    // Fetch live stats from API
-    fetch('/api/v1/health')
-      .then(() => {
-        // Fetch real counts
-        Promise.all([
-          fetch('/api/v1/operators').then(r => r.json()),
-        ]).then(([ops]) => {
-          setStats({
-            members: '—',
-            operators: Array.isArray(ops) ? ops.length.toString() : '—',
-            regions: 'Bali',
-          });
-        }).catch(() => {});
+    fetch('/api/v1/health/stats')
+      .then(r => r.json())
+      .then(data => {
+        setStats({
+          members: data.members > 0 ? data.members.toString() : '—',
+          operators: (data.operators + data.places).toString(),
+          regions: data.regions > 1 ? data.regions.toString() : 'Bali',
+        });
       }).catch(() => {});
   }, []);
 
