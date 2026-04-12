@@ -199,3 +199,17 @@ Security: Rate limiting, transactions, field whitelists, timing attack preventio
 ## Note: nginx/PM2 run as root
 - If logged in as andre, sudo su - before managing services
 - systemctl start nginx && pm2 resurrect to bring back after reboot
+
+## Member directory live
+- Privacy-safe member profiles (only shows members who opted in)
+- Filter by region, activity, next trip timing
+- Connection requests with optional intro message
+- Upcoming trips tab - find travel buddies
+- Members tab in sidebar for travelers
+- Migration 004 applied: member_connections, member_messages, member_trips tables
+
+## Data seeding next
+Priority 4: bulk ingest Google Places across all key Indonesian regions
+Regions to seed: Seminyak, Canggu, Ubud, Uluwatu, Nusa Penida, Amed, Sanur,
+  Lombok, Gili Islands, Flores, Labuan Bajo, Raja Ampat
+Categories per region: restaurants, accommodation, activities, diving
