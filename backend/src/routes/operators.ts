@@ -129,10 +129,6 @@ operatorsRouter.post('/', authenticate, async (req: AuthenticatedRequest, res: R
       return res.status(409).json({ message: 'Operator profile already exists' });
     }
 
-    const location = body.latitude && body.longitude
-      ? `ST_MakePoint(${body.longitude}, ${body.latitude})`
-      : 'NULL';
-
     const result = await pool.query(
       `INSERT INTO operators
          (id, user_id, business_name, description, category, website, phone, location, address, region, country)

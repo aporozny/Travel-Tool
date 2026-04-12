@@ -4,7 +4,7 @@ import { pool } from '../src/utils/db';
 import { redis } from '../src/utils/redis';
 
 const testEmail = `test_${Date.now()}@example.com`;
-const testPassword = 'testpassword123';
+const testPassword = 'TestPass2026!';
 
 afterAll(async () => {
   await pool.query('DELETE FROM users WHERE email LIKE $1', ['test_%@example.com']);
