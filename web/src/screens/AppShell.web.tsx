@@ -7,8 +7,9 @@ import BookingsScreen from './BookingsScreen.web';
 import SafetyScreen from './SafetyScreen.web';
 import ProfileScreen from './ProfileScreen.web';
 import DashboardScreen from './DashboardScreen.web';
+import MembersScreen from './MembersScreen.web';
 
-type Tab = 'explore' | 'bookings' | 'safety' | 'profile' | 'dashboard';
+type Tab = 'explore' | 'bookings' | 'safety' | 'profile' | 'dashboard' | 'members';
 
 export default function AppShell() {
   const dispatch = useDispatch<AppDispatch>();
@@ -26,6 +27,7 @@ export default function AppShell() {
       ]
     : [
         { key: 'explore', label: 'Explore', icon: '🗺' },
+        { key: 'members', label: 'Members', icon: '👥' },
         { key: 'bookings', label: 'Bookings', icon: '📋' },
         { key: 'safety', label: 'Safety', icon: '🛡' },
         { key: 'profile', label: 'Profile', icon: '👤' },
@@ -37,6 +39,7 @@ export default function AppShell() {
       case 'bookings': return <BookingsScreen />;
       case 'safety': return <SafetyScreen />;
       case 'profile': return <ProfileScreen />;
+      case 'members': return <MembersScreen />;
       case 'dashboard': return <DashboardScreen />;
       default: return null;
     }
