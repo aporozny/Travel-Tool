@@ -144,11 +144,13 @@ function TripCard({ trip }: any) {
 
 export default function MembersScreen() {
   const { user } = useSelector((s: RootState) => s.auth);
-  const [tab, setTab] = useState<'directory' | 'trips'>('directory');
+  const [tab, setTab] = useState<'directory' | 'trips' | 'connections'>('directory');
   const [members, setMembers] = useState<any[]>([]);
   const [trips, setTrips] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<any>(null);
+  const [connections, setConnections] = useState<any[]>([]);
+  const [pendingCount, setPendingCount] = useState(0);
   const [connectMsg, setConnectMsg] = useState('');
   const [connecting, setConnecting] = useState<string | null>(null);
   const [filterRegion, setFilterRegion] = useState('');
@@ -172,6 +174,24 @@ export default function MembersScreen() {
     }
   }, [filterRegion, filterActivity, filterNextTrip]);
 
+  const fetchConnections = useCallback(async () => {
+    try {
+      const res = await api.get('/members/me/connections');
+      setConnections(res.data || []);
+      setPendingCount((res.data || []).filter((c: any) => c.direction === 'received' && c.status === 'pending').length);
+    } catch (err) { console.error(err); }
+  }, []);
+
+  const fetchConnections2 = fetchConnections;
+
+  const handleConnectionResponse = async (connectionId: string, status: 'accepted' | 'declined') => {
+    try {
+      await api.patch(`/members/connections/${connectionId}`, { status });
+      setConnections(prev => prev.map(c => c.id === connectionId ? { ...c, status } : c));
+      setPendingCount(prev => Math.max(0, prev - 1));
+    } catch (err) { console.error(err); }
+  };
+
   const fetchTrips = useCallback(async () => {
     try {
       const res = await api.get('/members/trips');
@@ -183,8 +203,12 @@ export default function MembersScreen() {
 
   useEffect(() => {
     if (tab === 'directory') fetchMembers();
-    else fetchTrips();
-  }, [tab, fetchMembers, fetchTrips]);
+    else if (tab === 'trips') fetchTrips();
+    else fetchConnections();
+  }, [tab, fetchMembers, fetchTrips, fetchConnections]);
+
+  // Load pending count on mount
+  useEffect(() => { fetchConnections(); }, []);
 
   const handleConnect = async (member: any) => {
     if (connecting) return;
@@ -312,6 +336,10 @@ export default function MembersScreen() {
         <div style={s.tabs}>
           <button style={{ ...s.tab, ...(tab === 'directory' ? s.tabActive : {}) }} onClick={() => setTab('directory')}>Directory</button>
           <button style={{ ...s.tab, ...(tab === 'trips' ? s.tabActive : {}) }} onClick={() => setTab('trips')}>Upcoming trips</button>
+          <button style={{ ...s.tab, ...(tab === 'connections' ? s.tabActive : {}) }} onClick={() => { setTab('connections'); fetchConnections(); }}>
+            Connections
+            {pendingCount > 0 && <span style={s.badge}>{pendingCount}</span>}
+          </button>
         </div>
       </div>
 
@@ -361,6 +389,46 @@ export default function MembersScreen() {
         </>
       )}
 
+      {tab === 'connections' && (
+        <div style={s.tripList}>
+          {connections.length === 0 ? (
+            <div style={s.empty}><p>No connections yet.</p><p style={{ color: '#bbb', fontSize: 13, marginTop: 8 }}>Connect with members from the directory.</p></div>
+          ) : (
+            connections.map(c => (
+              <div key={c.id} style={s.tripCard}>
+                <div style={s.tripTop}>
+                  <Avatar name={c.other_display_name} size={36} />
+                  <div style={{ flex: 1 }}>
+                    <p style={s.tripName}>{c.other_display_name}</p>
+                    <p style={s.tripDest}>
+                      {c.other_regions?.slice(0,2).map((r: string) => r.replace(/_/g,' ')).join(' · ')}
+                      {c.other_next_trip ? ` · ${NEXT_TRIP_LABELS[c.other_next_trip] || c.other_next_trip}` : ''}
+                    </p>
+                  </div>
+                  <span style={{
+                    fontSize: 11, padding: '3px 8px', borderRadius: 6, fontWeight: 600,
+                    background: c.status === 'accepted' ? '#E8F5E9' : c.status === 'declined' ? '#ffebee' : '#FFF8E1',
+                    color: c.status === 'accepted' ? '#2E7D32' : c.status === 'declined' ? '#c62828' : '#F57F17',
+                  }}>
+                    {c.direction === 'received' && c.status === 'pending' ? 'Wants to connect' :
+                     c.direction === 'sent' && c.status === 'pending' ? 'Request sent' :
+                     c.status}
+                  </span>
+                </div>
+                {c.message && <p style={s.tripNotes}>"{c.message}"</p>}
+                {c.direction === 'received' && c.status === 'pending' && (
+                  <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                    <button style={s.connectBtn} onClick={() => handleConnectionResponse(c.id, 'accepted')}>Accept</button>
+                    <button style={{ ...s.connectBtn, background: '#fff', color: '#c62828', border: '1px solid #ffcdd2' }}
+                      onClick={() => handleConnectionResponse(c.id, 'declined')}>Decline</button>
+                  </div>
+                )}
+              </div>
+            ))
+          )}
+        </div>
+      )}
+
       {tab === 'trips' && (
         <div style={s.tripList}>
           {trips.length === 0 ? (
@@ -383,6 +451,7 @@ const s: Record<string, React.CSSProperties> = {
   title: { fontSize: 24, fontWeight: 700, color: '#1a1a1a', marginBottom: 4 },
   subtitle: { fontSize: 14, color: '#888', marginBottom: 16 },
   tabs: { display: 'flex', gap: 4, borderBottom: '2px solid #f0f0f0' },
+  badge: { background: '#c62828', color: '#fff', borderRadius: 10, padding: '1px 6px', fontSize: 11, marginLeft: 6 },
   tab: { padding: '10px 20px', border: 'none', background: 'transparent', fontSize: 14, color: '#888', cursor: 'pointer', fontWeight: 500 },
   tabActive: { color: '#1a1a1a', borderBottom: '2px solid #1a1a1a', marginBottom: -2 },
   filters: { display: 'flex', gap: 8, padding: '14px 24px', background: '#fff', borderBottom: '1px solid #f0f0f0', flexWrap: 'wrap' },
