@@ -181,7 +181,7 @@ export default function LandingScreen({ onJoin, onLogin }: Props) {
             <Step
               number="03"
               title="Connect and go deeper"
-              body="Ask the community questions, find members heading to the same region, and book directly with operators who've been vetted by people who know."
+              body="Ask the community questions, find members heading to the same region, and book directly with operators who match your travel style."
             />
           </div>
         </div>
@@ -356,7 +356,7 @@ const stat: Record<string, React.CSSProperties> = {
 const vp: Record<string, React.CSSProperties> = {
   grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 24 },
   card: { background: '#fff', borderRadius: 16, padding: 28, border: '1px solid #ebebeb' },
-  icon: { fontSize: 24, marginBottom: 16, color: '#1a1a1a' },
+  icon: { fontSize: 12, fontWeight: 700, color: '#2E7D32', letterSpacing: 1, marginBottom: 16, background: '#E8F5E9', padding: '4px 10px', borderRadius: 6, display: 'inline-block' },
   title: { fontSize: 18, fontWeight: 600, color: '#1a1a1a', marginBottom: 10 },
   body: { fontSize: 14, color: '#666', lineHeight: 1.7 },
 };
