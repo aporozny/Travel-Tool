@@ -182,3 +182,20 @@ Security: Rate limiting, transactions, field whitelists, timing attack preventio
 4. Seed data - run Google Places ingestion across all key Indonesian regions
 5. Operator claim flow - polish the web UI for operators to claim listings
 6. Mobile deployment - TestFlight (iOS) and Play Store beta (Android)
+
+## Platform renamed: Drift
+- Name: Drift
+- Tagline: "Travel with better people."
+- Other taglines saved: "Go deeper, everywhere", "Find your people", "Beyond the surface", "Let the world happen", "Go. Stay. Belong."
+- Expanding beyond Bali/Indonesia after initial launch
+
+## Landing page live
+- Full marketing page at root URL before login
+- Hero, value props, how it works, destinations, operator CTA, footer
+- Real stats from /health/stats endpoint (members, operators, places, regions)
+- Join/login flows from landing page buttons
+- Operator section with feature list
+
+## Note: nginx/PM2 run as root
+- If logged in as andre, sudo su - before managing services
+- systemctl start nginx && pm2 resurrect to bring back after reboot
