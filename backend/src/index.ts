@@ -17,6 +17,7 @@ import { searchRouter } from './routes/search';
 import { dashboardRouter } from './routes/dashboard';
 import { recommendationsRouter } from './routes/recommendations';
 import { membersRouter } from './routes/members';
+import { messagesRouter } from './routes/messages';
 import { photosRouter } from './routes/photos';
 import { errorHandler } from './middleware/errorHandler';
 import { notFound } from './middleware/notFound';
@@ -50,6 +51,7 @@ app.use('/api/v1/search', searchRateLimit, searchRouter);
 app.use('/api/v1/dashboard', dashboardRouter);
 app.use('/api/v1/recommendations', recommendationsRouter);
 app.use('/api/v1/members', membersRouter);
+app.use('/api/v1/messages', messagesRouter);
 app.use('/api/v1/photos', photosRouter);
 
 // Error handling

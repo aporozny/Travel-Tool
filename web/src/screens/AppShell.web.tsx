@@ -9,8 +9,9 @@ import SafetyScreen from './SafetyScreen.web';
 import ProfileScreen from './ProfileScreen.web';
 import DashboardScreen from './DashboardScreen.web';
 import MembersScreen from './MembersScreen.web';
+import MessagesScreen from './MessagesScreen.web';
 
-type Tab = 'explore' | 'bookings' | 'safety' | 'profile' | 'dashboard' | 'members';
+type Tab = 'explore' | 'bookings' | 'safety' | 'profile' | 'dashboard' | 'members' | 'messages';
 
 export default function AppShell() {
   const dispatch = useDispatch<AppDispatch>();
@@ -18,15 +19,24 @@ export default function AppShell() {
   const [tab, setTab] = useState<Tab>(user?.role === 'operator' ? 'dashboard' : 'explore');
   const [detail, setDetail] = useState<any>(null);
   const [pendingConnections, setPendingConnections] = useState(0);
+  const [unreadMessages, setUnreadMessages] = useState(0);
 
-  // Check for pending connection requests on load
+  // Check for pending connection requests and unread messages
   React.useEffect(() => {
     if (user?.role !== 'traveler') return;
-    api.get('/members/my/connections')
-      .then(r => {
-        const pending = (r.data || []).filter((c: any) => c.direction === 'received' && c.status === 'pending').length;
-        setPendingConnections(pending);
-      }).catch(() => {});
+    const check = () => {
+      api.get('/members/my/connections')
+        .then(r => {
+          const pending = (r.data || []).filter((c: any) => c.direction === 'received' && c.status === 'pending').length;
+          setPendingConnections(pending);
+        }).catch(() => {});
+      api.get('/messages/unread/count')
+        .then(r => setUnreadMessages(r.data.count || 0))
+        .catch(() => {});
+    };
+    check();
+    const interval = setInterval(check, 15000);
+    return () => clearInterval(interval);
   }, [user]);
 
   const isOperator = user?.role === 'operator';
@@ -40,6 +50,7 @@ export default function AppShell() {
     : [
         { key: 'explore', label: 'Explore', icon: '🗺' },
         { key: 'members', label: 'Members', icon: '👥', badge: pendingConnections },
+        { key: 'messages', label: 'Messages', icon: '💬', badge: unreadMessages },
         { key: 'bookings', label: 'Bookings', icon: '📋' },
         { key: 'safety', label: 'Safety', icon: '🛡' },
         { key: 'profile', label: 'Profile', icon: '👤' },
@@ -52,6 +63,7 @@ export default function AppShell() {
       case 'safety': return <SafetyScreen />;
       case 'profile': return <ProfileScreen />;
       case 'members': return <MembersScreen />;
+      case 'messages': return <MessagesScreen />;
       case 'dashboard': return <DashboardScreen />;
       default: return null;
     }
