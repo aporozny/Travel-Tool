@@ -392,6 +392,11 @@ export default function MembersScreen() {
 
       {tab === 'connections' && (
         <div style={s.tripList}>
+          {/* Debug */}
+          <div style={{ fontSize: 11, color: '#999', padding: '4px 8px' }}>
+            {connections.length} connection(s) loaded
+            {connections.map(c => ` | ${c.other_display_name}: dir=${c.direction} status=${c.status}`)}
+          </div>
           {connections.length === 0 ? (
             <div style={s.empty}><p>No connections yet.</p><p style={{ color: '#bbb', fontSize: 13, marginTop: 8 }}>Connect with members from the directory.</p></div>
           ) : (
