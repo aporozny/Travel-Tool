@@ -177,8 +177,9 @@ export default function MembersScreen() {
   const fetchConnections = useCallback(async () => {
     try {
       const res = await api.get('/members/my/connections');
-      setConnections(res.data || []);
-      setPendingCount((res.data || []).filter((c: any) => c.direction === 'received' && c.status === 'pending').length);
+      const data = res.data || [];
+      setConnections(data);
+      setPendingCount(data.filter((c: any) => c.direction === 'received' && c.status === 'pending').length);
     } catch (err) { console.error(err); }
   }, []);
 
@@ -336,7 +337,7 @@ export default function MembersScreen() {
         <div style={s.tabs}>
           <button style={{ ...s.tab, ...(tab === 'directory' ? s.tabActive : {}) }} onClick={() => setTab('directory')}>Directory</button>
           <button style={{ ...s.tab, ...(tab === 'trips' ? s.tabActive : {}) }} onClick={() => setTab('trips')}>Upcoming trips</button>
-          <button style={{ ...s.tab, ...(tab === 'connections' ? s.tabActive : {}) }} onClick={() => { setTab('connections'); fetchConnections(); }}>
+          <button style={{ ...s.tab, ...(tab === 'connections' ? s.tabActive : {}) }} onClick={() => { setTab('connections'); setConnections([]); setTimeout(fetchConnections, 100); }}>
             Connections
             {pendingCount > 0 && <span style={s.badge}>{pendingCount}</span>}
           </button>
@@ -416,13 +417,13 @@ export default function MembersScreen() {
                   </span>
                 </div>
                 {c.message && <p style={s.tripNotes}>"{c.message}"</p>}
-                {c.direction === 'received' && c.status === 'pending' && (
+                {(c.direction === 'received' && c.status === 'pending') ? (
                   <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
                     <button style={s.connectBtn} onClick={() => handleConnectionResponse(c.id, 'accepted')}>Accept</button>
-                    <button style={{ ...s.connectBtn, background: '#fff', color: '#c62828', border: '1px solid #ffcdd2' }}
+                    <button style={{ padding: '7px 18px', background: '#fff', color: '#c62828', border: '1px solid #ffcdd2', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}
                       onClick={() => handleConnectionResponse(c.id, 'declined')}>Decline</button>
                   </div>
-                )}
+                ) : null}
               </div>
             ))
           )}
