@@ -147,6 +147,8 @@ export default function MessagesScreen() {
   const [conversations, setConversations] = useState<any[]>([]);
   const [selected, setSelected] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [showNewMsg, setShowNewMsg] = useState(false);
+  const [connections, setConnections] = useState<any[]>([]);
 
   const fetchConversations = useCallback(async () => {
     try {
@@ -156,25 +158,70 @@ export default function MessagesScreen() {
     finally { setLoading(false); }
   }, []);
 
+  const fetchConnections = useCallback(async () => {
+    try {
+      const res = await api.get('/members/my/connections');
+      setConnections((res.data || []).filter((c: any) => c.status === 'accepted'));
+    } catch (err) { console.error(err); }
+  }, []);
+
   useEffect(() => {
     fetchConversations();
+    fetchConnections();
     const interval = setInterval(fetchConversations, 10000);
     return () => clearInterval(interval);
-  }, [fetchConversations]);
+  }, [fetchConversations, fetchConnections]);
 
   const handleSelect = (conv: any) => {
     setSelected(conv);
-    // Mark as read locally
+    setShowNewMsg(false);
     setConversations(prev => prev.map(c =>
       c.partner_id === conv.partner_id ? { ...c, unread_count: 0 } : c
     ));
   };
 
+  const startNewConversation = (conn: any) => {
+    setSelected({ partner_id: conn.other_user_id, other_name: conn.other_display_name, other_avatar: conn.other_avatar });
+    setShowNewMsg(false);
+  };
+
   if (loading) return <div style={s.loading}>Loading messages...</div>;
+
+  if (showNewMsg) {
+    return (
+      <div style={s.container}>
+        <div style={s.listPane}>
+          <div style={s.listHeader}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <button style={{ background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', color: '#555' }} onClick={() => setShowNewMsg(false)}>←</button>
+              <h2 style={s.listTitle}>New message</h2>
+            </div>
+          </div>
+          <div style={s.convList}>
+            {connections.length === 0 ? (
+              <div style={{ padding: '40px 20px', textAlign: 'center', color: '#888' }}>
+                <p>No connections yet.</p>
+                <p style={{ fontSize: 13, color: '#bbb', marginTop: 8 }}>Accept connection requests in the Members tab first.</p>
+              </div>
+            ) : connections.map((c: any) => (
+              <div key={c.other_user_id} style={s.convItem} onClick={() => startNewConversation(c)}>
+                <Avatar name={c.other_display_name} avatar={c.other_avatar} />
+                <div style={s.convInfo}>
+                  <p style={{ fontSize: 15, fontWeight: 600, color: '#1a1a1a' }}>{c.other_display_name}</p>
+                  <p style={{ fontSize: 12, color: '#888' }}>
+                    {c.other_regions?.slice(0,2).map((r: string) => r.replace(/_/g,' ')).join(' · ')}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={s.container}>
-      {/* Mobile: show thread if selected, else list */}
       {selected ? (
         <MessageThread
           conversation={selected}
@@ -184,13 +231,31 @@ export default function MessagesScreen() {
       ) : (
         <div style={s.listPane}>
           <div style={s.listHeader}>
-            <h2 style={s.listTitle}>Messages</h2>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <h2 style={s.listTitle}>Messages</h2>
+              <button
+                style={{ background: '#1a1a1a', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
+                onClick={() => setShowNewMsg(true)}>
+                + New
+              </button>
+            </div>
           </div>
           <ConversationList
             conversations={conversations}
             onSelect={handleSelect}
             selectedId={selected?.partner_id}
           />
+          {conversations.length === 0 && (
+            <div style={{ padding: '40px 20px', textAlign: 'center', color: '#888' }}>
+              <p style={{ marginBottom: 8 }}>No messages yet.</p>
+              <p style={{ fontSize: 13, color: '#bbb', marginBottom: 16 }}>Start a conversation with a connected member.</p>
+              <button
+                style={{ background: '#1a1a1a', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 20px', fontSize: 14, cursor: 'pointer' }}
+                onClick={() => setShowNewMsg(true)}>
+                Start a conversation
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>
