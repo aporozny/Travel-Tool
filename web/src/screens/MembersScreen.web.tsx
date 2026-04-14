@@ -392,46 +392,50 @@ export default function MembersScreen() {
 
       {tab === 'connections' && (
         <div style={s.tripList}>
-          {/* Debug */}
-          <div style={{ fontSize: 11, color: '#999', padding: '4px 8px' }}>
-            {connections.length} connection(s) loaded
-            {connections.map(c => ` | ${c.other_display_name}: dir=${c.direction} status=${c.status}`)}
-          </div>
-          {connections.length === 0 ? (
-            <div style={s.empty}><p>No connections yet.</p><p style={{ color: '#bbb', fontSize: 13, marginTop: 8 }}>Connect with members from the directory.</p></div>
-          ) : (
-            connections.map(c => (
-              <div key={c.id} style={s.tripCard}>
-                <div style={s.tripTop}>
-                  <Avatar name={c.other_display_name} size={36} />
+          {connections.length === 0 && (
+            <div style={s.empty}>
+              <p>No connections yet.</p>
+              <p style={{ color: '#bbb', fontSize: 13, marginTop: 8 }}>Connect with members from the directory.</p>
+            </div>
+          )}
+          {connections.map(c => {
+            const isPending = c.status === 'pending';
+            const isReceived = c.direction === 'received';
+            return (
+              <div key={c.id} style={{ ...s.tripCard, marginBottom: 12 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
+                  <Avatar name={c.other_display_name} size={40} />
                   <div style={{ flex: 1 }}>
-                    <p style={s.tripName}>{c.other_display_name}</p>
-                    <p style={s.tripDest}>
+                    <p style={{ fontSize: 15, fontWeight: 600, color: '#1a1a1a', marginBottom: 2 }}>{c.other_display_name}</p>
+                    <p style={{ fontSize: 12, color: '#888' }}>
                       {c.other_regions?.slice(0,2).map((r: string) => r.replace(/_/g,' ')).join(' · ')}
-                      {c.other_next_trip ? ` · ${NEXT_TRIP_LABELS[c.other_next_trip] || c.other_next_trip}` : ''}
                     </p>
                   </div>
                   <span style={{
-                    fontSize: 11, padding: '3px 8px', borderRadius: 6, fontWeight: 600,
-                    background: c.status === 'accepted' ? '#E8F5E9' : c.status === 'declined' ? '#ffebee' : '#FFF8E1',
-                    color: c.status === 'accepted' ? '#2E7D32' : c.status === 'declined' ? '#c62828' : '#F57F17',
+                    fontSize: 11, padding: '4px 10px', borderRadius: 6, fontWeight: 600,
+                    background: c.status === 'accepted' ? '#E8F5E9' : '#FFF8E1',
+                    color: c.status === 'accepted' ? '#2E7D32' : '#F57F17',
                   }}>
-                    {c.direction === 'received' && c.status === 'pending' ? 'Wants to connect' :
-                     c.direction === 'sent' && c.status === 'pending' ? 'Request sent' :
-                     c.status}
+                    {isReceived && isPending ? 'Wants to connect with you' : isPending ? 'Request sent' : 'Connected'}
                   </span>
                 </div>
-                {c.message && <p style={s.tripNotes}>"{c.message}"</p>}
-                {(c.direction === 'received' && c.status === 'pending') ? (
-                  <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-                    <button style={s.connectBtn} onClick={() => handleConnectionResponse(c.id, 'accepted')}>Accept</button>
-                    <button style={{ padding: '7px 18px', background: '#fff', color: '#c62828', border: '1px solid #ffcdd2', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}
-                      onClick={() => handleConnectionResponse(c.id, 'declined')}>Decline</button>
+                {isReceived && isPending && (
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button
+                      style={{ flex: 1, padding: '10px 0', background: '#1a1a1a', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: 'pointer' }}
+                      onClick={() => handleConnectionResponse(c.id, 'accepted')}>
+                      Accept
+                    </button>
+                    <button
+                      style={{ flex: 1, padding: '10px 0', background: '#fff', color: '#c62828', border: '1.5px solid #ffcdd2', borderRadius: 8, fontSize: 14, cursor: 'pointer' }}
+                      onClick={() => handleConnectionResponse(c.id, 'declined')}>
+                      Decline
+                    </button>
                   </div>
-                ) : null}
+                )}
               </div>
-            ))
-          )}
+            );
+          })}
         </div>
       )}
 
