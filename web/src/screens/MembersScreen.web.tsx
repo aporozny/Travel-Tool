@@ -174,13 +174,17 @@ export default function MembersScreen() {
     }
   }, [filterRegion, filterActivity, filterNextTrip]);
 
+  const [connectionsLoading, setConnectionsLoading] = useState(false);
+
   const fetchConnections = useCallback(async () => {
+    setConnectionsLoading(true);
     try {
       const res = await api.get('/members/my/connections');
       const data = res.data || [];
       setConnections(data);
       setPendingCount(data.filter((c: any) => c.direction === 'received' && c.status === 'pending').length);
     } catch (err) { console.error(err); }
+    finally { setConnectionsLoading(false); }
   }, []);
 
   const fetchConnections2 = fetchConnections;
@@ -337,7 +341,7 @@ export default function MembersScreen() {
         <div style={s.tabs}>
           <button style={{ ...s.tab, ...(tab === 'directory' ? s.tabActive : {}) }} onClick={() => setTab('directory')}>Directory</button>
           <button style={{ ...s.tab, ...(tab === 'trips' ? s.tabActive : {}) }} onClick={() => setTab('trips')}>Upcoming trips</button>
-          <button style={{ ...s.tab, ...(tab === 'connections' ? s.tabActive : {}) }} onClick={() => { setTab('connections'); setConnections([]); setTimeout(fetchConnections, 100); }}>
+          <button style={{ ...s.tab, ...(tab === 'connections' ? s.tabActive : {}) }} onClick={() => { setTab('connections'); fetchConnections(); }}>
             Connections
             {pendingCount > 0 && <span style={s.badge}>{pendingCount}</span>}
           </button>
@@ -392,7 +396,10 @@ export default function MembersScreen() {
 
       {tab === 'connections' && (
         <div style={s.tripList}>
-          {connections.length === 0 && (
+          {connectionsLoading && connections.length === 0 && (
+            <div style={s.loading}>Loading connections...</div>
+          )}
+          {!connectionsLoading && connections.length === 0 && (
             <div style={s.empty}>
               <p>No connections yet.</p>
               <p style={{ color: '#bbb', fontSize: 13, marginTop: 8 }}>Connect with members from the directory.</p>
