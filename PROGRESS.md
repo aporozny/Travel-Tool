@@ -237,3 +237,32 @@ Categories per region: restaurants, accommodation, activities, diving
 - nginx goes down occasionally - watchdog handles it
 - Must be root to run pm2/nginx directly (andre has aliases)
 - Port 5000 EADDRINUSE on rapid restarts - add sleep to deploy.sh
+
+## Session Apr 14 - Messaging complete
+
+### What was fixed/built
+- Connections Accept/Decline buttons fixed (timing issue - loading state added)
+- Direct messaging fully working:
+  - Conversation list with unread badges
+  - Thread view with real-time polling (8 second interval)
+  - New conversation button - pick from connected members
+  - Messages update both ways in real time
+- Data restore after reboot:
+  - restore-data.sh script created
+  - seed-operator.sh script created  
+  - boot.sh updated to start PostgreSQL first
+  - Crontab: @reboot boot.sh, */5 watchdog.sh
+
+### Test credentials
+- Jake: jake.morrison@drifttest.com / DriftTest2026!
+- Sarah: sarah.chen@drifttest.com / DriftTest2026!
+- All test members: DriftTest2026!
+- Operator: operator@tapasita.com / DriftTest2026!
+
+### Next priorities
+1. Photo sharing (need to decide: local storage vs Cloudflare R2)
+2. Community feed (posts, trip reports, tips)
+3. Operator claim flow UI
+4. NusaBlue - start fresh session
+5. Mobile TestFlight/Play Store
+6. Domain + SSL for Drift
