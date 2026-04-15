@@ -292,8 +292,8 @@ safetyRouter.get('/verification/stream', authenticate, (req: AuthenticatedReques
 
 const tripSchema = z.object({
   destination: z.string().min(1),
-  plannedStart: z.string().datetime(),
-  plannedEnd: z.string().datetime(),
+  start_date: z.string().datetime(),
+  end_date: z.string().datetime(),
   checkinIntervalHours: z.number().int().min(1).max(168).default(24),
   notes: z.string().max(500).optional(),
 });
@@ -314,12 +314,11 @@ safetyRouter.post('/trips', authenticate, async (req: AuthenticatedRequest, res:
 
     const result = await pool.query(
       `INSERT INTO member_trips
-         (traveler_id, destination, planned_start, planned_end,
+         (user_id, destination, start_date, end_date,
           checkin_interval_hours, notes, safety_status)
-       SELECT t.id, $1, $2, $3, $4, $5, 'planned'
-       FROM travelers t WHERE t.user_id = $6
-       RETURNING id, destination, planned_start, planned_end, safety_status`,
-      [body.destination, body.plannedStart, body.plannedEnd,
+       VALUES ($6, $1, $2, $3, $4, $5, 'planned')
+       RETURNING id, destination, start_date, end_date, safety_status`,
+      [body.destination, body.start_date, body.end_date,
        body.checkinIntervalHours, body.notes ?? null, req.user!.id]
     );
     return res.status(201).json(result.rows[0]);
@@ -334,13 +333,12 @@ safetyRouter.post('/trips', authenticate, async (req: AuthenticatedRequest, res:
 safetyRouter.get('/trips', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const result = await pool.query(
-      `SELECT mt.id, mt.destination, mt.planned_start, mt.planned_end,
+      `SELECT mt.id, mt.destination, mt.start_date, mt.end_date,
               mt.safety_status, mt.next_checkin_due, mt.last_checkin_at,
               mt.checkin_interval_hours, mt.notes
        FROM member_trips mt
-       JOIN travelers t ON t.id = mt.traveler_id
-       WHERE t.user_id = $1
-       ORDER BY mt.planned_start DESC`,
+       WHERE mt.user_id = $1
+       ORDER BY mt.start_date DESC`,
       [req.user!.id]
     );
     return res.json(result.rows);
