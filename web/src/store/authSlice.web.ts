@@ -4,8 +4,8 @@ import { tokenStorage } from '../services/api.web';
 import { User } from '@/types';
 
 const BASE_URL = process.env.NODE_ENV === 'production'
-  ? 'https://api.travel-tool.com/api/v1'
-  : 'http://localhost:5000/api/v1';
+  ? 'http://100.67.86.49/api/v1'
+  : 'http://100.67.86.49/api/v1';
 
 interface AuthState {
   user: User | null;

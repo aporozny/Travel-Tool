@@ -318,3 +318,4 @@ async function main() {
 }
 
 main().catch(err => { console.error(err); process.exit(1); });
+// Note: operator@tapasita.com is created separately via seed-operator.sh

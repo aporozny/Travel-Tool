@@ -1,8 +1,6 @@
 import axios, { AxiosInstance, InternalAxiosRequestConfig } from 'axios';
 
-const BASE_URL = process.env.NODE_ENV === 'production'
-  ? 'https://api.travel-tool.com/api/v1'
-  : 'http://localhost:5000/api/v1';
+const BASE_URL = 'http://100.67.86.49/api/v1';
 
 const TOKEN_KEY = 'tt_access_token';
 const REFRESH_KEY = 'tt_refresh_token';
