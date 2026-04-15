@@ -35,12 +35,14 @@ services:
       REDIS_URL: redis://redis:6379
       JWT_SECRET: dev-jwt-secret-change-in-production
       JWT_REFRESH_SECRET: dev-refresh-secret-change-in-production
+      UPLOAD_DIR: /app/uploads
       ENCRYPTION_KEY: 0000000000000000000000000000000000000000000000000000000000000000
     depends_on:
       - postgres
       - redis
     volumes:
       - ./backend/src:/app/src
+      - /var/www/travel-tool/uploads:/app/uploads
 volumes:
   postgres_data:
   redis_data:
