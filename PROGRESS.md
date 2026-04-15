@@ -266,3 +266,29 @@ Categories per region: restaurants, accommodation, activities, diving
 4. NusaBlue - start fresh session
 5. Mobile TestFlight/Play Store
 6. Domain + SSL for Drift
+
+## Session Apr 15 - Safety system designed, Gmail connected
+
+### Safety system architecture designed (not yet built)
+Five layers:
+1. Passive monitoring - location every 5 min when "I'm out" is on
+2. Awareness signals - no movement 90min = check-in ping
+3. Check-in scheduling - set return time, missed = escalation
+4. SOS + "Get me home" - one tap, finds taxi, routes to accommodation
+5. Emergency escalation - auto-escalate if no response in 5 min
+
+Supporting: saved accommodation, emergency contacts, local operator network
+DB tables already exist: safety_contacts, location_history, sos_events
+
+### Build order for safety system
+1. Accommodation save (anchor point)
+2. "I'm out" toggle + location tracking
+3. Check-in scheduling
+4. SOS button + "Get me home"
+5. Emergency contacts + live map link
+6. Auto-escalation failsafe
+
+### Other notes
+- NusaBlue audit reviewed - needs landing page fix first, then SaaS build
+- OpenClaw Gmail auth fixed (token saved to ~/.openclaw/workspace/integrations/gmail/token.json)
+- This is the most important feature Drift will ever ship - start fresh session to build it
