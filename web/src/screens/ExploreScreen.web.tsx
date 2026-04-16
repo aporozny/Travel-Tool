@@ -27,7 +27,7 @@ function PhotoUrl(ref: string): string {
 
 function ScoreBadge({ score, personalized }: { score: number; personalized: boolean }) {
   if (!personalized || score === 0) return null;
-  const color = score >= 70 ? '#2E7D32' : score >= 40 ? '#F57F17' : '#888';
+  const color = score >= 70 ? '#C9A84C' : score >= 40 ? '#F57F17' : '#888';
   return (
     <span style={{ ...styles.scoreBadge, background: color }}>
       {score}% match
@@ -59,7 +59,10 @@ function ResultCard({ item, personalized, onSave, saved, onView }: any) {
         <div style={styles.cardTopRow}>
           <span style={styles.cardCategory}>{item.category}</span>
           {item.is_verified && <span style={styles.verifiedBadge}>✓ Verified</span>}
+          {item.trust_tier === 'elite' && <span style={styles.eliteBadge}>◆ Elite</span>}
+          {item.trust_tier === 'trusted' && <span style={styles.trustedBadge}>★ Trusted</span>}
           {item.is_claimed && !item.is_verified && <span style={styles.claimedBadge}>Claimed</span>}
+          {!item.operator_id && <span style={styles.unclaimedBadge}>Unclaimed</span>}
         </div>
         <h3 style={styles.cardName}>{item.name}</h3>
         <p style={styles.cardRegion}>{item.region}</p>
@@ -276,9 +279,9 @@ const styles: Record<string, React.CSSProperties> = {
   filterRow: { display: 'flex', gap: 8, alignItems: 'center' },
   filterScroll: { display: 'flex', gap: 6, overflowX: 'auto', flex: 1 },
   filterChip: { padding: '6px 14px', borderRadius: 20, border: '1.5px solid #e0e0e0', background: '#fff', fontSize: 13, cursor: 'pointer', whiteSpace: 'nowrap', color: '#555' },
-  filterChipActive: { borderColor: '#2E7D32', background: '#f0f7f0', color: '#2E7D32', fontWeight: 500 },
+  filterChipActive: { borderColor: '#C9A84C', background: '#FBF5E6', color: '#C9A84C', fontWeight: 500 },
   regionSelect: { padding: '6px 10px', borderRadius: 8, border: '1px solid #e0e0e0', fontSize: 13, background: '#fff', color: '#555' },
-  personalizedNote: { fontSize: 12, color: '#2E7D32', marginTop: 8, fontWeight: 500 },
+  personalizedNote: { fontSize: 12, color: '#C9A84C', marginTop: 8, fontWeight: 500 },
   loading: { padding: 60, textAlign: 'center', color: '#999' },
   empty: { padding: 60, textAlign: 'center', color: '#999' },
   grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16, padding: 20 },
@@ -291,7 +294,7 @@ const styles: Record<string, React.CSSProperties> = {
   cardBody: { padding: '12px 14px 14px' },
   cardTopRow: { display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 },
   cardCategory: { fontSize: 11, color: '#999', textTransform: 'capitalize' },
-  verifiedBadge: { fontSize: 10, color: '#2E7D32', background: '#E8F5E9', padding: '1px 6px', borderRadius: 4, fontWeight: 600 },
+  verifiedBadge: { fontSize: 10, color: '#C9A84C', background: '#FBF5E6', padding: '1px 6px', borderRadius: 4, fontWeight: 600 },
   claimedBadge: { fontSize: 10, color: '#F57F17', background: '#FFF8E1', padding: '1px 6px', borderRadius: 4 },
   cardName: { fontSize: 15, fontWeight: 600, color: '#1a1a1a', marginBottom: 2 },
   cardRegion: { fontSize: 12, color: '#999', marginBottom: 6 },
@@ -311,7 +314,10 @@ const styles: Record<string, React.CSSProperties> = {
   detailRegion: { fontSize: 14, color: '#888', marginBottom: 10 },
   detailDesc: { fontSize: 15, color: '#555', lineHeight: 1.7, marginBottom: 16 },
   detailLinks: { display: 'flex', gap: 16, alignItems: 'center', marginBottom: 20 },
-  detailLink: { color: '#2E7D32', fontSize: 14, fontWeight: 500 },
+  detailLink: { color: '#C9A84C', fontSize: 14, fontWeight: 500 },
+  eliteBadge: { fontSize: 10, color: '#A8893A', background: '#FBF5E6', padding: '1px 6px', borderRadius: 4, fontWeight: 700 },
+  trustedBadge: { fontSize: 10, color: '#10B981', background: '#ECFDF5', padding: '1px 6px', borderRadius: 4, fontWeight: 600 },
+  unclaimedBadge: { fontSize: 10, color: '#9B9590', background: '#F5F3EF', padding: '1px 6px', borderRadius: 4, fontWeight: 500 },
   detailPhone: { color: '#555', fontSize: 14 },
-  bookBtn: { width: '100%', padding: '14px 0', background: '#2E7D32', color: '#fff', border: 'none', borderRadius: 12, fontSize: 16, fontWeight: 600, cursor: 'pointer' },
+  bookBtn: { width: '100%', padding: '14px 0', background: '#C9A84C', color: '#fff', border: 'none', borderRadius: 12, fontSize: 16, fontWeight: 600, cursor: 'pointer' },
 };

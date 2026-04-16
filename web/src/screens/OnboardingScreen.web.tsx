@@ -579,9 +579,9 @@ const styles: Record<string, React.CSSProperties> = {
   headerLogo: { fontSize: 14, fontWeight: 700, color: '#1a1a1a', marginBottom: 12 },
   progress: { display: 'flex', alignItems: 'center', gap: 12 },
   progressBar: { flex: 1, height: 4, background: '#f0f0f0', borderRadius: 2 },
-  progressFill: { height: 4, background: '#2E7D32', borderRadius: 2, transition: 'width 0.3s ease' },
+  progressFill: { height: 4, background: '#C9A84C', borderRadius: 2, transition: 'width 0.3s ease' },
   progressText: { fontSize: 12, color: '#999', whiteSpace: 'nowrap' },
-  stepName: { fontSize: 12, color: '#2E7D32', fontWeight: 500, marginTop: 8 },
+  stepName: { fontSize: 12, color: '#C9A84C', fontWeight: 500, marginTop: 8 },
   body: { flex: 1, maxWidth: 720, width: '100%', margin: '0 auto', padding: '24px 16px 80px' },
   step: {},
   stepTitle: { fontSize: 26, fontWeight: 700, color: '#1a1a1a', marginBottom: 6 },
@@ -597,13 +597,13 @@ const styles: Record<string, React.CSSProperties> = {
     transition: 'all 0.15s', fontWeight: 400,
   },
   optionCardSelected: {
-    borderColor: '#2E7D32', background: '#f0f7f0', color: '#1a5c1a', fontWeight: 500,
+    borderColor: '#C9A84C', background: '#FBF5E6', color: '#A8893A', fontWeight: 500,
   },
   optionLabel: {},
-  optionCheck: { fontSize: 12, color: '#2E7D32' },
+  optionCheck: { fontSize: 12, color: '#C9A84C' },
   btnRow: { display: 'flex', gap: 12, marginTop: 32 },
   nextBtn: {
-    flex: 1, padding: '14px 0', background: '#2E7D32', color: '#fff',
+    flex: 1, padding: '14px 0', background: '#C9A84C', color: '#fff',
     border: 'none', borderRadius: 12, fontSize: 16, fontWeight: 600, cursor: 'pointer',
   },
   backBtn: {
@@ -611,5 +611,5 @@ const styles: Record<string, React.CSSProperties> = {
     border: '1px solid #e0e0e0', borderRadius: 12, fontSize: 15, cursor: 'pointer',
   },
   error: { background: '#ffebee', color: '#c62828', padding: '10px 14px', borderRadius: 8, marginBottom: 16, fontSize: 14 },
-  saving: { background: '#E8F5E9', color: '#2E7D32', padding: '8px 14px', borderRadius: 8, marginBottom: 12, fontSize: 13 },
+  saving: { background: '#FBF5E6', color: '#C9A84C', padding: '8px 14px', borderRadius: 8, marginBottom: 12, fontSize: 13 },
 };

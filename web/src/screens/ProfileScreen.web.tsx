@@ -16,6 +16,12 @@ export default function ProfileScreen() {
   const [bio, setBio] = useState('');
   const [phone, setPhone] = useState('');
 
+  const [posts, setPosts] = useState<any[]>([]);
+
+  useEffect(() => {
+    api.get('/community/posts').then(r => setPosts(r.data || [])).catch(() => {});
+  }, []);
+
   useEffect(() => {
     Promise.all([api.get('/travelers/me'), api.get('/travelers/me/preferences')])
       .then(([p, pref]) => {
@@ -125,6 +131,34 @@ export default function ProfileScreen() {
           </div>
         </>
       )}
+      {/* My Posts */}
+      <div style={styles.card}>
+        <h3 style={{ fontSize: 16, fontWeight: 700, color: '#1A1A1A', marginBottom: 16 }}>My Posts</h3>
+        {posts.length === 0 ? (
+          <p style={{ color: '#9B9590', fontSize: 14 }}>No posts yet. Share something from the Feed tab.</p>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {posts.map((post: any) => (
+              <div key={post.id} style={{ padding: '12px 0', borderBottom: '1px solid #F0EDE8' }}>
+                {post.region && (
+                  <span style={{ fontSize: 11, color: '#A8893A', background: '#FBF5E6', borderRadius: 20, padding: '2px 8px', fontWeight: 600, marginBottom: 6, display: 'inline-block' }}>
+                    {post.region}
+                  </span>
+                )}
+                <p style={{ fontSize: 14, color: '#1A1A1A', lineHeight: 1.6, marginTop: 4 }}>{post.body}</p>
+                <div style={{ display: 'flex', gap: 12, marginTop: 6 }}>
+                  <span style={{ fontSize: 12, color: '#9B9590' }}>👍 {post.reaction_count}</span>
+                  <span style={{ fontSize: 12, color: '#9B9590' }}>◇ {post.comment_count}</span>
+                  <span style={{ fontSize: 12, color: '#9B9590' }}>
+                    {new Date(post.created_at).toLocaleDateString()}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
     </div>
   );
 }
@@ -133,10 +167,10 @@ const styles: Record<string, React.CSSProperties> = {
   container: { padding: 32, maxWidth: 720 },
   headerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 },
   title: { fontSize: 28, fontWeight: 700, color: '#1a1a1a' },
-  editBtn: { padding: '10px 20px', background: '#2E7D32', color: '#fff', border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 600, cursor: 'pointer' },
+  editBtn: { padding: '10px 20px', background: '#C9A84C', color: '#fff', border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 600, cursor: 'pointer' },
   card: { background: '#fff', borderRadius: 16, padding: 24, marginBottom: 16, boxShadow: '0 2px 8px rgba(0,0,0,0.06)' },
   avatarRow: { display: 'flex', alignItems: 'center', gap: 16, marginBottom: 24 },
-  avatar: { width: 64, height: 64, borderRadius: 32, background: '#2E7D32', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28, fontWeight: 700, flexShrink: 0 },
+  avatar: { width: 64, height: 64, borderRadius: 32, background: '#C9A84C', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28, fontWeight: 700, flexShrink: 0 },
   name: { fontSize: 18, fontWeight: 600, color: '#1a1a1a' },
   email: { fontSize: 13, color: '#888' },
   fields: { display: 'flex', flexDirection: 'column', gap: 16 },
@@ -147,5 +181,5 @@ const styles: Record<string, React.CSSProperties> = {
   sectionTitle: { fontSize: 16, fontWeight: 600, color: '#1a1a1a', marginBottom: 14 },
   chips: { display: 'flex', flexWrap: 'wrap', gap: 8 },
   chip: { padding: '8px 16px', borderRadius: 20, border: '1px solid #e8e8e8', background: '#fafafa', fontSize: 13, cursor: 'pointer', fontWeight: 500, color: '#555' },
-  chipActive: { background: '#2E7D32', borderColor: '#2E7D32', color: '#fff' },
+  chipActive: { background: '#C9A84C', borderColor: '#C9A84C', color: '#fff' },
 };
