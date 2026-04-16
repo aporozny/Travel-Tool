@@ -1,7 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { WhosGoingPanel } from './WhosGoingPanel';
-import { WhosGoingPanel } from './WhosGoingPanel';
-import { WhosGoingPanel } from './WhosGoingPanel';
 import api from '../services/api.web';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
