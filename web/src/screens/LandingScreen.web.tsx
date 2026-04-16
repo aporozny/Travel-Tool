@@ -47,7 +47,7 @@ export default function LandingScreen({ onJoin, onLogin }: Props) {
       .then(data => {
         setStats({
           members: data.members > 0 ? data.members.toString() : '—',
-          operators: (parseInt(data.operators) + parseInt(data.places)).toString(),
+          operators: (data.operators + data.places).toString(),
           regions: data.regions > 1 ? data.regions.toString() : 'Bali',
         });
       }).catch(() => {});
