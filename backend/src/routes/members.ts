@@ -156,6 +156,93 @@ membersRouter.get('/', optionalAuth, async (req: AuthenticatedRequest, res: Resp
 
 // GET /api/v1/members/:userId
 // Individual member profile - privacy safe
+membersRouter.get('/my/connections', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const result = await pool.query(
+      `SELECT
+         mc.id, mc.status, mc.message, mc.created_at,
+         CASE WHEN mc.requester_id = $1 THEN mc.recipient_id ELSE mc.requester_id END AS other_user_id,
+         CASE WHEN mc.requester_id = $1 THEN 'sent' ELSE 'received' END AS direction,
+         COALESCE(t.display_name, t.first_name, split_part(u.email, '@', 1)) AS other_display_name,
+         t.avatar_url AS other_avatar,
+         mp.bucket_list_regions AS other_regions,
+         mp.next_trip_timing AS other_next_trip
+       FROM member_connections mc
+       JOIN users u ON u.id = CASE WHEN mc.requester_id = $1 THEN mc.recipient_id ELSE mc.requester_id END
+       JOIN travelers t ON t.user_id = u.id
+       JOIN member_preferences mp ON mp.traveler_id = t.id
+       WHERE mc.requester_id = $1 OR mc.recipient_id = $1
+       ORDER BY mc.created_at DESC`,
+      [req.user!.id]
+    );
+
+    return res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+membersRouter.get('/trips', optionalAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { destination, region, looking_for } = req.query;
+
+    let query = `
+      SELECT
+        mt.*,
+        COALESCE(t.display_name, t.first_name, split_part(u.email, '@', 1)) AS member_name,
+        t.avatar_url,
+        mp.travel_style AS member_style,
+        mp.budget_range,
+        mp.water_activities,
+        mp.adrenaline_level
+      FROM member_trips mt
+      JOIN users u ON u.id = mt.user_id
+      JOIN travelers t ON t.user_id = u.id
+      JOIN member_preferences mp ON mp.traveler_id = t.id
+      WHERE mt.is_public = true
+        AND u.is_active = true
+        AND t.show_in_directory = true
+        AND (mt.end_date IS NULL OR mt.end_date >= CURRENT_DATE)
+    `;
+
+    const params: any[] = [];
+    let paramCount = 1;
+
+    if (destination) {
+      query += ` AND mt.destination ILIKE $${paramCount}`;
+      params.push(`%${destination}%`);
+      paramCount++;
+    }
+
+    if (region) {
+      query += ` AND mt.region ILIKE $${paramCount}`;
+      params.push(`%${region}%`);
+      paramCount++;
+    }
+
+    if (looking_for) {
+      query += ` AND mt.looking_for && ARRAY[$${paramCount}]::text[]`;
+      params.push(looking_for);
+      paramCount++;
+    }
+
+    if (req.user) {
+      query += ` AND mt.user_id != $${paramCount}`;
+      params.push(req.user.id);
+      paramCount++;
+    }
+
+    query += ` ORDER BY mt.start_date ASC NULLS LAST, mt.created_at DESC LIMIT 50`;
+
+    const result = await pool.query(query, params);
+    return res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
 membersRouter.get('/:userId', optionalAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const result = await pool.query(
@@ -298,32 +385,39 @@ membersRouter.patch('/connections/:connectionId', authenticate, async (req: Auth
 
 // GET /api/v1/members/me/connections
 // Get my connections and pending requests
-membersRouter.get('/my/connections', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+
+// PATCH /api/v1/members/connections/:connectionId
+// Accept or decline a connection request
+membersRouter.patch('/connections/:connectionId', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
+    const { status } = z.object({
+      status: z.enum(['accepted', 'declined']),
+    }).parse(req.body);
+
     const result = await pool.query(
-      `SELECT
-         mc.id, mc.status, mc.message, mc.created_at,
-         CASE WHEN mc.requester_id = $1 THEN mc.recipient_id ELSE mc.requester_id END AS other_user_id,
-         CASE WHEN mc.requester_id = $1 THEN 'sent' ELSE 'received' END AS direction,
-         COALESCE(t.display_name, t.first_name, split_part(u.email, '@', 1)) AS other_display_name,
-         t.avatar_url AS other_avatar,
-         mp.bucket_list_regions AS other_regions,
-         mp.next_trip_timing AS other_next_trip
-       FROM member_connections mc
-       JOIN users u ON u.id = CASE WHEN mc.requester_id = $1 THEN mc.recipient_id ELSE mc.requester_id END
-       JOIN travelers t ON t.user_id = u.id
-       JOIN member_preferences mp ON mp.traveler_id = t.id
-       WHERE mc.requester_id = $1 OR mc.recipient_id = $1
-       ORDER BY mc.created_at DESC`,
-      [req.user!.id]
+      `UPDATE member_connections
+       SET status = $1, updated_at = NOW()
+       WHERE id = $2 AND recipient_id = $3 AND status = 'pending'
+       RETURNING id, status, requester_id, recipient_id`,
+      [status, req.params.connectionId, req.user!.id]
     );
 
-    return res.json(result.rows);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'Connection request not found' });
+    }
+
+    return res.json(result.rows[0]);
   } catch (err) {
+    if (err instanceof z.ZodError) {
+      return res.status(400).json({ message: 'Validation error', errors: err.errors });
+    }
     console.error(err);
     return res.status(500).json({ message: 'Internal server error' });
   }
 });
+
+// GET /api/v1/members/me/connections
+// Get my connections and pending requests
 
 // POST /api/v1/members/trips
 // Create a public trip plan
@@ -369,62 +463,3 @@ membersRouter.post('/trips', authenticate, async (req: AuthenticatedRequest, res
 
 // GET /api/v1/members/trips
 // Browse upcoming public trips - find travel buddies
-membersRouter.get('/trips', optionalAuth, async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const { destination, region, looking_for } = req.query;
-
-    let query = `
-      SELECT
-        mt.*,
-        COALESCE(t.display_name, t.first_name, split_part(u.email, '@', 1)) AS member_name,
-        t.avatar_url,
-        mp.travel_style AS member_style,
-        mp.budget_range,
-        mp.water_activities,
-        mp.adrenaline_level
-      FROM member_trips mt
-      JOIN users u ON u.id = mt.user_id
-      JOIN travelers t ON t.user_id = u.id
-      JOIN member_preferences mp ON mp.traveler_id = t.id
-      WHERE mt.is_public = true
-        AND u.is_active = true
-        AND t.show_in_directory = true
-        AND (mt.end_date IS NULL OR mt.end_date >= CURRENT_DATE)
-    `;
-
-    const params: any[] = [];
-    let paramCount = 1;
-
-    if (destination) {
-      query += ` AND mt.destination ILIKE $${paramCount}`;
-      params.push(`%${destination}%`);
-      paramCount++;
-    }
-
-    if (region) {
-      query += ` AND mt.region ILIKE $${paramCount}`;
-      params.push(`%${region}%`);
-      paramCount++;
-    }
-
-    if (looking_for) {
-      query += ` AND mt.looking_for && ARRAY[$${paramCount}]::text[]`;
-      params.push(looking_for);
-      paramCount++;
-    }
-
-    if (req.user) {
-      query += ` AND mt.user_id != $${paramCount}`;
-      params.push(req.user.id);
-      paramCount++;
-    }
-
-    query += ` ORDER BY mt.start_date ASC NULLS LAST, mt.created_at DESC LIMIT 50`;
-
-    const result = await pool.query(query, params);
-    return res.json(result.rows);
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ message: 'Internal server error' });
-  }
-});
