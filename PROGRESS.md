@@ -292,3 +292,29 @@ DB tables already exist: safety_contacts, location_history, sos_events
 - NusaBlue audit reviewed - needs landing page fix first, then SaaS build
 - OpenClaw Gmail auth fixed (token saved to ~/.openclaw/workspace/integrations/gmail/token.json)
 - This is the most important feature Drift will ever ship - start fresh session to build it
+
+## Session — Apr 16 2026
+
+### Completed
+- Community feed live (posts, reactions, comments, photo upload)
+- Drift branding — gold palette, DM Serif Display, clean sidebar
+- Explore screen — destination picker with region pills, persists in localStorage
+- Safety screen — full hub with Overview/Trips/Contacts/Identity tabs
+- Who's Going panel — trip discovery in community feed
+- Seeded 9 posts, 16 reactions, 10 comments across all 8 test members
+- All 8 members have display names
+- native postgres disabled/masked (docker only)
+- drifttravel.app purchased — DNS pending Namecheap support
+
+### Known issues
+- DNS for drifttravel.app not yet propagated (Namecheap support)
+- SSL pending DNS
+- Photos not showing (Google Places API key needed in backend .env)
+- Operator trust scores not showing on Explore cards (operators need trust scores seeded)
+- All results showing 54% match (Sarah's preferences not fully set)
+
+### Next
+- Seed a trip from a member so Who's Going panel shows data
+- Wire operator trust scores to Explore
+- Get DNS sorted and run Certbot
+- Mobile app wiring
