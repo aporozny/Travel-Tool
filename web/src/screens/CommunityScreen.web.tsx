@@ -118,12 +118,10 @@ export default function CommunityScreen() {
 
       {/* Who is going */}
       <div style={{ padding: "0 32px" }}>
-        <WhosGoingPanel />
       </div>
 
       {/* Who is going */}
       <div style={{ padding: "0 32px" }}>
-        <WhosGoingPanel />
       </div>
 
       {/* Feed */}
