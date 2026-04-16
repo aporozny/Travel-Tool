@@ -81,9 +81,9 @@ communityRouter.get('/feed', authenticate, async (req: AuthenticatedRequest, res
          AND cp.visibility = 'public'
          AND (
            cp.author_id IN (
-             SELECT CASE WHEN user1_id = $1 THEN user2_id ELSE user1_id END
+             SELECT CASE WHEN requester_id = $1 THEN recipient_id ELSE requester_id END
              FROM member_connections
-             WHERE (user1_id = $1 OR user2_id = $1) AND status = 'accepted'
+             WHERE (requester_id = $1 OR recipient_id = $1) AND status = 'accepted'
            )
            OR cp.author_id = $1
            ${region ? 'OR cp.region ILIKE $4' : ''}
