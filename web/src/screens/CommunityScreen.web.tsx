@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { WhosGoingPanel } from './WhosGoingPanel';
 import api from '../services/api.web';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
@@ -108,6 +109,11 @@ export default function CommunityScreen() {
         >
           Following
         </button>
+      </div>
+
+      {/* Who is going */}
+      <div style={{ padding: "0 32px" }}>
+        <WhosGoingPanel />
       </div>
 
       {/* Feed */}
