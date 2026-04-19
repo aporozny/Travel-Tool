@@ -1,1 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Reheat Guide | The Pasta Lab Osteria</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;1,400&family=Lato:wght@300;400;700&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{--gold:#D4A017;--parchment:#F8F1E9;--charcoal:#1A1A1A;--red:#8B0000;--step-bg:#242424;--divider:rgba(212,160,23,0.25)}
+body{background:var(--charcoal);color:var(--parchment);font-family:'Lato',sans-serif;min-height:100vh;padding-bottom:3rem}
+.header{background:#111;border-bottom:1px solid var(--divider);padding:1.25rem 1.5rem;text-align:center}
+.brand{font-family:'Playfair Display',serif;font-weight:700;font-size:1rem;letter-spacing:.12em;color:var(--gold);text-transform:uppercase}
+.brand span{font-style:italic;font-weight:400;color:rgba(212,160,23,0.7);font-size:.8rem;display:block;letter-spacing:.2em;margin-top:2px}
+.hero{padding:2rem 1.5rem 1.5rem;text-align:center;border-bottom:1px solid var(--divider)}
+.dish-label{font-size:.7rem;letter-spacing:.2em;text-transform:uppercase;color:var(--gold);font-weight:700;margin-bottom:.5rem}
+.dish-name{font-family:'Playfair Display',serif;font-weight:700;font-size:2rem;color:var(--parchment);line-height:1.2;margin-bottom:.75rem}
+.dish-sub{font-size:.85rem;color:rgba(248,241,233,0.5);font-weight:300}
+.badge{display:inline-flex;align-items:center;gap:.4rem;background:rgba(212,160,23,0.12);border:1px solid rgba(212,160,23,0.3);border-radius:2rem;padding:.4rem 1rem;margin-top:1.25rem;font-size:.8rem;color:var(--gold);font-weight:700}
+.content{padding:1.75rem 1.5rem 0;max-width:480px;margin:0 auto}
+.section-title{font-size:.65rem;letter-spacing:.18em;text-transform:uppercase;color:var(--gold);font-weight:700;margin-bottom:1rem;display:flex;align-items:center;gap:.75rem}
+.section-title::after{content:'';flex:1;height:1px;background:var(--divider)}
+.needs{display:grid;grid-template-columns:1fr 1fr;gap:.6rem;margin-bottom:2rem}
+.need-item{background:var(--step-bg);border:1px solid rgba(255,255,255,0.06);border-radius:8px;padding:.75rem 1rem;font-size:.8rem;color:rgba(248,241,233,0.7);display:flex;align-items:center;gap:.5rem}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--gold);flex-shrink:0}
+.steps{display:flex;flex-direction:column;gap:.75rem;margin-bottom:2rem}
+.step{background:var(--step-bg);border:1px solid rgba(255,255,255,0.06);border-radius:10px;padding:1.1rem 1.25rem;display:flex;gap:1rem;align-items:flex-start}
+.step.hl{border-color:rgba(212,160,23,0.3);background:rgba(212,160,23,0.06)}
+.num{width:28px;height:28px;border-radius:50%;background:var(--gold);color:var(--charcoal);font-weight:700;font-size:.8rem;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px}
+.step-title{font-weight:700;font-size:.9rem;color:var(--parchment);margin-bottom:.3rem;font-family:'Playfair Display',serif}
+.step-desc{font-size:.8rem;color:rgba(248,241,233,0.6);line-height:1.6}
+.step-desc strong{color:var(--gold);font-weight:700}
+.tip{background:rgba(139,0,0,0.12);border:1px solid rgba(139,0,0,0.3);border-left:3px solid var(--red);border-radius:8px;padding:1rem 1.1rem;margin-bottom:2rem;font-size:.8rem;color:rgba(248,241,233,0.7);line-height:1.6}
+.tip strong{color:#e05555;font-weight:700;display:block;margin-bottom:.3rem;font-size:.7rem;letter-spacing:.1em;text-transform:uppercase}
+.allergens{background:var(--step-bg);border:1px solid rgba(255,255,255,0.06);border-radius:10px;padding:1.1rem 1.25rem;margin-bottom:2rem}
+.tags{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.6rem}
+.tag{background:rgba(139,0,0,0.2);border:1px solid rgba(139,0,0,0.4);border-radius:4px;padding:.2rem .6rem;font-size:.7rem;color:#e05555;font-weight:700;text-transform:uppercase}
+.storage{background:var(--step-bg);border:1px solid rgba(255,255,255,0.06);border-radius:10px;padding:1.1rem 1.25rem;margin-bottom:2rem;font-size:.8rem;color:rgba(248,241,233,0.6);line-height:1.7}
+.storage strong{color:var(--parchment);font-weight:700}
+.footer{text-align:center;padding:0 1.5rem;max-width:480px;margin:0 auto}
+.tagline{font-family:'Playfair Display',serif;font-style:italic;color:var(--gold);font-size:.95rem;margin-bottom:.5rem}
+.address{font-size:.7rem;color:rgba(248,241,233,0.3);letter-spacing:.08em}
+.divider{height:1px;background:var(--divider);margin:1.5rem 0}
+.nf{text-align:center;padding:4rem 2rem}
+.nf h2{font-family:'Playfair Display',serif;color:var(--gold);margin-bottom:1rem}
+.nf p{color:rgba(248,241,233,0.5);font-size:.9rem}
+</style>
+</head>
+<body>
+<div class="header"><div class="brand">The Pasta Lab <span>Osteria &middot; Garran ACT</span></div></div>
+<div id="app"></div>
+<script>
+const D={
+'carbonara':{name:'Pasta alla Carbonara',sub:'Rigatoni &middot; Guanciale &middot; Egg &middot; Pecorino Romano &middot; Black Pepper',allergens:['Eggs','Dairy','Pork','Gluten'],special:'Never microwave Carbonara. The sauce contains egg &mdash; microwave heat will scramble it instantly. The pouch water bath method gives you a perfect silky result every time.',steps:[{t:'Fill and heat',d:'Fill a medium saucepan with water and bring to a <strong>bare simmer</strong> &mdash; small bubbles only, not a rolling boil.',h:false},{t:'Submerge both pouches',d:'Place both sealed pouches in at the same time. Keep water at a <strong>gentle simmer only</strong>. The cornstarch stabilises the egg emulsion.',h:true},{t:'Heat for 3&ndash;5 minutes',d:'Leave both pouches fully submerged for <strong>3&ndash;5 minutes</strong>, turning once halfway.',h:false},{t:'Rest the pasta',d:'Remove pouches. Cut the <strong>pasta pouch first</strong> and tip into your bowl. Rest <strong>30 seconds</strong>.',h:false},{t:'Add sauce and toss',d:'Cut the <strong>sauce pouch</strong> and pour over. Toss vigorously for <strong>60 seconds</strong> until silky and glossy.',h:true}]},
+'cacio-e-pepe':{name:'Pasta Cacio e Pepe',sub:'Tonnarelli &middot; Pecorino Romano &middot; Black Pepper',allergens:['Dairy','Gluten'],special:'The Pecorino sauce can seize if overheated. Cornstarch in the sauce keeps it smooth. Keep water at a gentle simmer &mdash; never a rolling boil. Toss vigorously so the cheese emulsifies around every strand.',steps:[{t:'Fill and heat',d:'Fill a medium saucepan with water and bring to a <strong>bare simmer</strong>.',h:false},{t:'Submerge both pouches',d:'Place both pouches in at the same time. Keep water at a <strong>gentle simmer</strong> throughout.',h:true},{t:'Heat for 3&ndash;5 minutes',d:'Leave submerged for <strong>3&ndash;5 minutes</strong>. Sauce is ready when uniformly warm through the pouch.',h:false},{t:'Rest the pasta',d:'Cut the <strong>pasta pouch first</strong>, tip into bowl. Rest <strong>30 seconds</strong>.',h:false},{t:'Add sauce and toss hard',d:'Pour over sauce and toss <strong>vigorously for 90 seconds</strong>. Friction emulsifies the Pecorino into a silky coating.',h:true}]},
+'gricia':{name:'Pasta alla Gricia',sub:'Rigatoni &middot; Guanciale &middot; Pecorino Romano &middot; Black Pepper',allergens:['Dairy','Pork','Gluten'],special:null,steps:[{t:'Fill and heat',d:'Fill a medium saucepan with water and bring to a <strong>gentle simmer</strong>.',h:false},{t:'Submerge both pouches',d:'Place both sealed pouches in the simmering water at the same time.',h:true},{t:'Heat for 3&ndash;5 minutes',d:'Leave submerged for <strong>3&ndash;5 minutes</strong>, turning once halfway.',h:false},{t:'Cut and combine',d:'Cut the <strong>pasta pouch</strong>, tip into bowl. Cut the <strong>sauce pouch</strong> and pour over.',h:false},{t:'Toss and serve',d:'Toss well for <strong>30 seconds</strong>. Guanciale fat coats every rigatoni. Serve immediately.',h:true}]},
+'zozzona':{name:'Pasta alla Zozzona',sub:'Rigatoni &middot; Guanciale &middot; Sausage &middot; San Marzano Tomato &middot; Egg &middot; Pecorino',allergens:['Eggs','Dairy','Pork','Gluten'],special:null,steps:[{t:'Fill and heat',d:'Fill a medium saucepan with water and bring to a <strong>gentle simmer</strong>.',h:false},{t:'Submerge both pouches',d:'Place both sealed pouches in the simmering water at the same time.',h:true},{t:'Heat for 3&ndash;5 minutes',d:'Leave submerged for <strong>3&ndash;5 minutes</strong>. The sauce is dense &mdash; heat all the way through.',h:false},{t:'Cut and combine',d:'Cut the <strong>pasta pouch</strong>, tip into bowl. Cut the <strong>sauce pouch</strong> and pour over.',h:false},{t:'Toss and serve',d:'Toss well for <strong>45 seconds</strong>. Finish with extra Pecorino if available. Serve immediately.',h:true}]},
+'gnocchi-tomato':{name:'Potato Gnocchi with Fresh Tomato',sub:'Potato Gnocchi &middot; San Marzano Tomato &middot; Basil &middot; Fior di Latte',allergens:['Dairy','Gluten'],special:null,steps:[{t:'Fill and heat',d:'Fill a medium saucepan with water and bring to a <strong>gentle simmer</strong>.',h:false},{t:'Submerge both pouches',d:'Place both sealed pouches in the simmering water at the same time.',h:true},{t:'Heat for 4&ndash;5 minutes',d:'Gnocchi are dense &mdash; give them a full <strong>4&ndash;5 minutes</strong> to heat through evenly.',h:false},{t:'Cut and combine',d:'Cut the <strong>gnocchi pouch</strong>, tip into bowl. Cut the <strong>sauce pouch</strong> and pour over.',h:false},{t:'Toss gently and serve',d:'Toss <strong>gently</strong> &mdash; gnocchi are delicate. Serve immediately.',h:true}]},
+'gnocchi-pork-ragu':{name:'Gnocchi with Pork Rib Rag\u00f9',sub:'Potato Gnocchi &middot; Slow-Braised Pork Rib &middot; San Marzano Tomato &middot; Red Wine',allergens:['Dairy','Pork','Gluten','Sulphites'],special:null,steps:[{t:'Fill and heat',d:'Fill a medium saucepan with water and bring to a <strong>gentle simmer</strong>.',h:false},{t:'Submerge both pouches',d:'Place both sealed pouches in the simmering water. The rag\u00f9 is rich &mdash; it benefits from a full heat through.',h:true},{t:'Heat for 4&ndash;5 minutes',d:'Leave submerged for <strong>4&ndash;5 minutes</strong>. Ensure the sauce pouch is fully warm before removing.',h:false},{t:'Cut and combine',d:'Tip gnocchi into bowl. Pour the rag\u00f9 generously over the top.',h:false},{t:'Fold gently and serve',d:'Fold the rag\u00f9 through gently. The pork should fall apart through every bite.',h:true}]},
+'gnocchi-pancetta':{name:'Gnocchi with Pancetta, Spinach & Parmesan Cream',sub:'Potato Gnocchi &middot; Pancetta &middot; Baby Spinach &middot; Parmesan &middot; Cream',allergens:['Dairy','Pork','Gluten'],special:null,steps:[{t:'Fill and heat',d:'Fill a medium saucepan with water and bring to a <strong>gentle simmer</strong>.',h:false},{t:'Submerge both pouches',d:'Place both sealed pouches in the simmering water at the same time.',h:true},{t:'Heat for 4&ndash;5 minutes',d:'Leave submerged for <strong>4&ndash;5 minutes</strong>. Cream sauce should be uniformly warm through the pouch.',h:false},{t:'Cut and combine',d:'Tip gnocchi into bowl. Pour the cream sauce over immediately &mdash; it thickens quickly as it cools.',h:false},{t:'Fold and serve',d:'Fold gently so the cream coats every gnocco. Serve immediately.',h:true}]},
+'calamari-fra-diavolo':{name:'Fettuccine with Calamari Fra Diavolo',sub:'Fettuccine &middot; Calamari &middot; San Marzano Tomato &middot; Chilli &middot; Garlic &middot; White Wine',allergens:['Shellfish','Gluten','Sulphites'],special:null,steps:[{t:'Fill and heat',d:'Fill a medium saucepan with water and bring to a <strong>gentle simmer</strong>.',h:false},{t:'Submerge both pouches',d:'Place both sealed pouches in the simmering water at the same time.',h:true},{t:'Heat for 3&ndash;4 minutes',d:'Calamari is delicate &mdash; <strong>3&ndash;4 minutes</strong> only. Do not overheat or it will toughen.',h:false},{t:'Cut and combine',d:'Remove promptly. Tip fettuccine into bowl, pour the Fra Diavolo sauce over immediately.',h:false},{t:'Toss and serve',d:'Toss well. The chilli heat builds as you eat. Serve with crusty bread if available.',h:true}]},
+'chilli-prawn-pappardelle':{name:'Chilli Prawn Pappardelle',sub:'Pappardelle &middot; Tiger Prawns &middot; Chilli &middot; Garlic &middot; Cherry Tomato &middot; White Wine &middot; Parsley',allergens:['Shellfish','Gluten','Sulphites'],special:null,steps:[{t:'Fill and heat',d:'Fill a medium saucepan with water and bring to a <strong>gentle simmer</strong>.',h:false},{t:'Submerge both pouches',d:'Place both sealed pouches in the simmering water at the same time.',h:true},{t:'Heat for 3&ndash;4 minutes',d:'Prawns are delicate &mdash; <strong>3&ndash;4 minutes maximum</strong>. Remove promptly when sauce pouch is uniformly warm.',h:false},{t:'Cut and combine',d:'Tip pappardelle into bowl. Pour chilli prawn sauce over immediately &mdash; the wide ribbons soak it up fast.',h:false},{t:'Toss and serve',d:'Toss gently so ribbons stay intact. Chilli heat builds as you eat. Serve immediately.',h:true}]},
+'seafood-carbonara':{name:'Seafood Carbonara',sub:'Spaghetti &middot; Mixed Seafood &middot; Egg &middot; Pecorino Romano &middot; Black Pepper',allergens:['Shellfish','Eggs','Dairy','Gluten'],special:'This dish contains egg in the sauce and delicate seafood. Never microwave. Keep water at a gentle simmer &mdash; not a rolling boil &mdash; to protect both the seafood texture and egg emulsion. Remove promptly at 3&ndash;4 minutes.',steps:[{t:'Fill and heat',d:'Fill a medium saucepan with water and bring to a <strong>bare simmer</strong> &mdash; small bubbles only.',h:false},{t:'Submerge both pouches',d:'Place both sealed pouches in at the same time. Keep water at a <strong>gentle simmer throughout</strong>.',h:true},{t:'Heat for 3&ndash;4 minutes',d:'Remove at <strong>3&ndash;4 minutes maximum</strong>. The seafood is already cooked &mdash; you are heating, not cooking.',h:false},{t:'Rest the pasta',d:'Cut the <strong>pasta pouch</strong>, tip into bowl. Rest <strong>20 seconds</strong> before adding sauce.',h:false},{t:'Add sauce and toss',d:'Cut the <strong>sauce pouch</strong> and pour over. Toss vigorously for <strong>60 seconds</strong>. Sauce should be silky, not scrambled.',h:true}]}
+};
 
+function render(){
+const p=new URLSearchParams(window.location.search);
+const id=p.get('dish')||'';
+const dish=D[id];
+const app=document.getElementById('app');
+if(!dish){app.innerHTML='<div class="nf"><h2>Dish not found</h2><p>Check the QR code on your packaging or visit The Pasta Lab Osteria in Garran.</p></div>';return}
+document.title='Reheat Guide \u2014 '+dish.name+' | The Pasta Lab Osteria';
+const steps=dish.steps.map((s,i)=>'<div class="step'+(s.h?' hl':'')+'"><div class="num">'+(i+1)+'</div><div><div class="step-title">'+s.t+'</div><div class="step-desc">'+s.d+'</div></div></div>').join('');
+const tags=dish.allergens.map(a=>'<span class="tag">'+a+'</span>').join('');
+const tip=dish.special?'<div class="tip"><strong>Chef\'s note</strong>'+dish.special+'</div>':'';
+app.innerHTML='<div class="hero"><div class="dish-label">Reheat Guide</div><h1 class="dish-name">'+dish.name+'</h1><p class="dish-sub">'+dish.sub+'</p><div class="badge">&#9202; Ready in 5 minutes</div></div><div class="content"><div class="section-title">What you need</div><div class="needs"><div class="need-item"><span class="dot"></span>Medium saucepan</div><div class="need-item"><span class="dot"></span>Tongs or fork</div><div class="need-item"><span class="dot"></span>Serving bowl</div><div class="need-item"><span class="dot"></span>Both pouches</div></div><div class="section-title">Steps</div><div class="steps">'+steps+'</div>'+tip+'<div class="section-title">Allergens</div><div class="allergens"><div class="tags">'+tags+'</div></div><div class="section-title">Storage</div><div class="storage"><strong>Keep refrigerated below 5&deg;C at all times.</strong><br>Consume within <strong>5 days</strong> of purchase.<br>Do not freeze. Once opened, consume immediately.</div></div><div class="footer"><div class="divider"></div><div class="tagline">Precision. Pasta. Pleasure.</div><div class="address">The Pasta Lab Osteria &middot; Garran ACT &middot; Open nightly 4&ndash;9pm</div></div>';
+}
+render();
+</script>
+</body>
+</html>
