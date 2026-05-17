@@ -590,3 +590,31 @@ safetyRouter.get('/operators/:id/trust', async (req: any, res: Response) => {
     return res.status(500).json({ message: 'Internal server error' });
   }
 });
+
+// Emergency numbers endpoint
+safetyRouter.get('/emergency-numbers', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { country } = req.query;
+    
+    if (!country || typeof country !== 'string') {
+      return res.status(400).json({ error: 'country parameter required (ISO code: AU, ID, TH, etc)' });
+    }
+
+    const result = await pool.query(
+      'SELECT country_code, country_name, service_type, number, description, hours, language FROM emergency_numbers WHERE UPPER(country_code) = UPPER($1) ORDER BY service_type',
+      [country]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Country not found in database' });
+    }
+
+    res.json({
+      country: result.rows[0].country_name,
+      numbers: result.rows,
+    });
+  } catch (err: any) {
+    console.error('Emergency numbers error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});

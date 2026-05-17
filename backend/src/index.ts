@@ -20,6 +20,7 @@ import { membersRouter } from './routes/members';
 import { messagesRouter } from './routes/messages';
 import { photosRouter } from './routes/photos';
 import { communityRouter } from './routes/community';
+import { profileRouter } from './routes/profile';
 import { errorHandler } from './middleware/errorHandler';
 import { notFound } from './middleware/notFound';
 import { authRateLimit, searchRateLimit, apiRateLimit } from './middleware/rateLimit';
@@ -55,6 +56,7 @@ app.use('/api/v1/members', membersRouter);
 app.use('/api/v1/messages', messagesRouter);
 app.use('/api/v1/photos', photosRouter);
 app.use('/api/v1/community', communityRouter);
+app.use('/api/v1/profile', profileRouter);
 
 // Error handling
 app.use(notFound);
