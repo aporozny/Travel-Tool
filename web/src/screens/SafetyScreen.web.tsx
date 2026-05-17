@@ -87,7 +87,7 @@ export default function SafetyScreen() {
     if (!tripDest.trim()) return;
     setSavingTrip(true);
     try {
-      const res = await api.post('/members/trips', {
+      const res = await api.post('/safety/trips', {
         destination: tripDest,
         region: tripRegion || undefined,
         start_date: tripStart || undefined,
