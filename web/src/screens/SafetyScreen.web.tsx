@@ -22,13 +22,19 @@ const REGIONS = [
 ];
 
 export default function SafetyScreen() {
-  const [tab, setTab] = useState<'overview'|'trips'|'contacts'|'verify'>('overview');
+  const [tab, setTab] = useState<'overview'|'trips'|'contacts'|'verify'|'location'>('overview');
   const [contacts, setContacts] = useState<any[]>([]);
   const [trips, setTrips] = useState<any[]>([]);
   const [verification, setVerification] = useState<any>({ status: 'none' });
   const [sosLoading, setSosLoading] = useState(false);
   const [sosResult, setSosResult] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+
+  // Location tracking
+  const [currentLocation, setCurrentLocation] = useState<any>(null);
+  const [locationHistory, setLocationHistory] = useState<any[]>([]);
+  const [postingLocation, setPostingLocation] = useState(false);
+  const [geoError, setGeoError] = useState<string | null>(null);
 
   // New trip form
   const [showTripForm, setShowTripForm] = useState(false);
@@ -53,12 +59,36 @@ export default function SafetyScreen() {
       api.get('/safety/contacts').catch(() => ({ data: [] })),
       api.get('/safety/trips').catch(() => ({ data: [] })),
       api.get('/safety/verification/status').catch(() => ({ data: { status: 'none' } })),
-    ]).then(([c, t, v]) => {
+      api.get('/safety/location/history?limit=10').catch(() => ({ data: [] })),
+    ]).then(([c, t, v, h]) => {
       setContacts(c.data || []);
       setTrips(t.data || []);
       setVerification(v.data || { status: 'none' });
+      setLocationHistory(h.data || []);
     }).finally(() => setLoading(false));
   }, []);
+
+  const handlePostLocation = async () => {
+    setPostingLocation(true);
+    setGeoError(null);
+    try {
+      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject);
+      });
+      const { latitude, longitude } = position.coords;
+      const { data } = await api.post('/safety/location', { latitude, longitude });
+      setCurrentLocation(data);
+      alert(`Location saved: ${latitude.toFixed(4)}, ${longitude.toFixed(4)}`);
+      const updated = await api.get('/safety/location/history?limit=10');
+      setLocationHistory(updated.data || []);
+    } catch (e: any) {
+      const msg = e.message || 'Could not get location';
+      setGeoError(msg);
+      alert(`Error: ${msg}`);
+    } finally {
+      setPostingLocation(false);
+    }
+  };
 
   const handleSOS = async () => {
     if (!window.confirm(`Send SOS alert to ${contacts.filter((c: any) => c.receives_sos).length} emergency contact(s)?`)) return;
@@ -177,6 +207,7 @@ export default function SafetyScreen() {
   const TABS = [
     { key: 'overview', label: 'Overview' },
     { key: 'trips', label: `Trips${trips.length ? ` (${trips.length})` : ''}` },
+    { key: 'location', label: 'Location' },
     { key: 'contacts', label: `Contacts${contacts.length ? ` (${contacts.length})` : ''}` },
     { key: 'verify', label: 'Identity' },
   ];
@@ -333,6 +364,63 @@ export default function SafetyScreen() {
           </div>
         )}
 
+        {/* ── LOCATION ── */}
+        {tab === 'location' && (
+          <div>
+            <div style={s.sectionHeader}>
+              <h3 style={s.sectionTitle}>Location Tracking</h3>
+            </div>
+
+            {/* Current location card */}
+            <div style={s.formCard}>
+              <h4 style={s.formTitle}>Share Your Location</h4>
+              <p style={s.formDesc}>Share your current location with emergency contacts and trip companions.</p>
+              {geoError && <div style={s.errorMsg}>⚠ {geoError}</div>}
+              <button style={{ ...s.saveBtn, width: '100%', marginBottom: 12 }} onClick={handlePostLocation} disabled={postingLocation}>
+                {postingLocation ? '📍 Getting location...' : '📍 Share my location now'}
+              </button>
+              {currentLocation && (
+                <div style={s.locationInfo}>
+                  <div style={s.locDetail}>Last shared: {new Date(currentLocation.recorded_at).toLocaleString()}</div>
+                  <div style={s.locDetail}>Coords: {currentLocation.latitude.toFixed(4)}, {currentLocation.longitude.toFixed(4)}</div>
+                </div>
+              )}
+            </div>
+
+            {/* Location history */}
+            <div style={s.sectionHeader}>
+              <h3 style={s.sectionTitle}>Recent Locations (last 10)</h3>
+            </div>
+
+            {locationHistory.length === 0 ? (
+              <div style={s.empty}>
+                <p style={s.emptyIcon}>📍</p>
+                <p style={s.emptyTitle}>No location history</p>
+                <p style={s.emptyDesc}>Share your location to start building a location history for your trip.</p>
+              </div>
+            ) : (
+              <div style={s.locationList}>
+                {locationHistory.map((loc: any, idx: number) => (
+                  <div key={idx} style={s.locationItem}>
+                    <div style={s.locTime}>{new Date(loc.recorded_at).toLocaleString()}</div>
+                    <div style={s.locCoords}>
+                      {loc.latitude.toFixed(4)}, {loc.longitude.toFixed(4)}
+                    </div>
+                    <a 
+                      href={`https://maps.google.com/?q=${loc.latitude},${loc.longitude}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={s.mapLink}
+                    >
+                      View on map →
+                    </a>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* ── CONTACTS ── */}
         {tab === 'contacts' && (
           <div>
@@ -465,6 +553,7 @@ const s: Record<string, React.CSSProperties> = {
   // Form
   formCard: { background: '#fff', borderRadius: 16, padding: 20, marginBottom: 16, border: '1px solid #F0EDE8' },
   formTitle: { fontSize: 15, fontWeight: 600, color: '#1A1A1A', marginBottom: 14 },
+  formDesc: { fontSize: 13, color: '#9B9590', marginBottom: 16 },
   formGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 },
   input: { padding: '10px 12px', border: '1px solid #E8E4DE', borderRadius: 8, fontSize: 14, outline: 'none', background: '#f8f7f4', width: '100%', boxSizing: 'border-box' as const },
   textarea: { width: '100%', padding: '10px 12px', border: '1px solid #E8E4DE', borderRadius: 8, fontSize: 14, outline: 'none', background: '#f8f7f4', minHeight: 80, resize: 'vertical' as const, marginBottom: 12, boxSizing: 'border-box' as const },
@@ -473,6 +562,16 @@ const s: Record<string, React.CSSProperties> = {
   formActions: { display: 'flex', gap: 8 },
   cancelBtn: { padding: '8px 16px', border: '1px solid #E8E4DE', borderRadius: 8, background: 'none', fontSize: 13, cursor: 'pointer', color: '#9B9590' },
   saveBtn: { padding: '8px 16px', border: 'none', borderRadius: 8, background: '#C9A84C', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' },
+
+  // Location
+  locationInfo: { background: '#ECFDF5', borderRadius: 10, padding: 12, marginTop: 12 },
+  locDetail: { fontSize: 13, color: '#10B981', lineHeight: 1.6 },
+  locationList: { display: 'flex', flexDirection: 'column', gap: 8 },
+  locationItem: { background: '#fff', borderRadius: 12, padding: '14px 16px', border: '1px solid #F0EDE8' },
+  locTime: { fontSize: 13, fontWeight: 600, color: '#1A1A1A', marginBottom: 4 },
+  locCoords: { fontSize: 12, color: '#9B9590', fontFamily: 'monospace', marginBottom: 8 },
+  mapLink: { fontSize: 12, color: '#C9A84C', textDecoration: 'none', fontWeight: 500 },
+  errorMsg: { background: '#FFEBEE', color: '#C62828', borderRadius: 10, padding: '10px 14px', fontSize: 13, marginBottom: 12 },
 
   // Trips
   tripCard: { background: '#fff', borderRadius: 14, padding: 18, marginBottom: 12, border: '1px solid #F0EDE8' },
