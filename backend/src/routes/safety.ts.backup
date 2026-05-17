@@ -373,24 +373,50 @@ safetyRouter.post('/trips/:id/start', authenticate, async (req: AuthenticatedReq
 safetyRouter.post('/trips/checkin', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const body = checkinSchema.parse(req.body);
+
     const trip = await pool.query(
-      `SELECT next_checkin_due FROM member_trips WHERE id = $1`,
+      `SELECT mt.id, mt.checkin_interval_hours
+       FROM member_trips mt
+       JOIN travelers t ON t.id = mt.traveler_id
+       WHERE mt.id = $1 AND t.user_id = $2 AND mt.safety_status IN ('active','overdue')`,
+      [body.tripId, req.user!.id]
+    );
+    if (!trip.rows.length) return res.status(404).json({ message: 'Active trip not found' });
+
+    // Log check-in
+    const checkin = await pool.query(
+      `INSERT INTO trip_checkins (trip_id, traveler_id, lat, lng, battery_pct, note)
+       SELECT $1, t.id, $2, $3, $4, $5
+       FROM travelers t WHERE t.user_id = $6
+       RETURNING id`,
+      [body.tripId, body.latitude ?? null, body.longitude ?? null,
+       body.batteryPct ?? null, body.note ?? null, req.user!.id]
+    );
+
+    // Advance next due
+    const updated = await pool.query(
+      `UPDATE member_trips SET
+        safety_status    = 'active',
+        last_checkin_at  = NOW(),
+        next_checkin_due = NOW() + (checkin_interval_hours * INTERVAL '1 hour')
+       WHERE id = $1 RETURNING next_checkin_due`,
       [body.tripId]
     );
-    if (!trip.rows.length) return res.status(404).json({ message: 'Trip not found' });
-    const result = await pool.query(
-      `INSERT INTO trip_checkins (trip_id, scheduled_return, checked_in_at, escalation_level)
-       VALUES ($1, $2, NOW(), 0)
-       RETURNING id, checked_in_at`,
-      [body.tripId, trip.rows[0].next_checkin_due]
-    );
-    return res.status(201).json(result.rows[0]);
+
+    return res.json({
+      checkinId: checkin.rows[0].id,
+      tripId: body.tripId,
+      nextDueAt: updated.rows[0].next_checkin_due,
+      status: 'active',
+    });
   } catch (err) {
     if (err instanceof z.ZodError) return res.status(400).json({ message: 'Validation error', errors: err.errors });
     console.error(err);
     return res.status(500).json({ message: 'Internal server error' });
   }
 });
+
+// POST /api/v1/safety/trips/:id/complete
 safetyRouter.post('/trips/:id/complete', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const result = await pool.query(
@@ -590,3 +616,5 @@ safetyRouter.get('/operators/:id/trust', async (req: any, res: Response) => {
     return res.status(500).json({ message: 'Internal server error' });
   }
 });
+
+// Trips endpoints

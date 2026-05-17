@@ -27,12 +27,12 @@ services:
     container_name: traveller-backend
     restart: unless-stopped
     ports:
-      - "5000:5000"
+      - "5001:5000"
     environment:
       NODE_ENV: development
       PORT: 5000
       DATABASE_URL: postgresql://traveller:traveller@postgres:5432/traveller_dev
-      REDIS_URL: redis://redis:6379
+      REDIS_URL: redis://100.67.86.49:6379
       JWT_SECRET: dev-jwt-secret-change-in-production
       JWT_REFRESH_SECRET: dev-refresh-secret-change-in-production
       UPLOAD_DIR: /app/uploads
@@ -42,7 +42,7 @@ services:
       - redis
     volumes:
       - ./backend/src:/app/src
-      - /var/www/travel-tool/uploads:/app/uploads
+      - /var/www/drift/uploads:/app/uploads
 volumes:
   postgres_data:
   redis_data:
