@@ -69,3 +69,20 @@ All 14 endpoints tested and verified:
 - Build mobile safety dashboard
 - Deploy to drifttravel.app
 
+
+## May 17, 2026 - Session 2: Deployment Fixed
+
+**ISSUE:** Web app returned 500 Permission Denied
+**ROOT CAUSE:** /home/andre directory had drwxr-x--- (others blocked)
+**SOLUTION:** 
+- sudo chmod 755 /home/andre
+- Fixed parent directory traversal for www-data
+
+**RESULT:** ✅ Web app fully operational
+- http://100.67.86.49 loads correctly
+- Login works
+- API endpoints responding
+- 8 test members visible
+
+**NEXT:** Build remaining features, not deployment
+
