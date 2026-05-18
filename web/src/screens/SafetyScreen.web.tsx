@@ -241,6 +241,21 @@ export default function SafetyScreen() {
         {tab === 'overview' && (
           <div>
             {/* SOS */}
+            {/* Emergency Numbers */}
+            <div style={s.emergencyCard}>
+              <h3 style={s.emergencyTitle}>📞 Emergency Numbers</h3>
+              {emergencyNumbers.length > 0 ? (
+                <div style={s.emergencyGrid}>
+                  {emergencyNumbers.map((num: any) => (
+                    <a key={num.service_type} href={`tel:${num.number.replace(/\D/g, "")}`} style={s.emergencyBtn}>
+                      <div>{num.service_type === "police" ? "🚔" : "🚑"}</div>
+                      <div style={s.emergencyLabel}>{num.service_type}</div>
+                      <div style={s.emergencyNumber}>{num.number}</div>
+                    </a>
+                  ))}
+                </div>
+              ) : null}
+            </div>
             <div style={s.sosCard}>
               <div>
                 <h3 style={s.sosTitle}>🚨 Emergency SOS</h3>
@@ -523,6 +538,14 @@ export default function SafetyScreen() {
 
 const s: Record<string, React.CSSProperties> = {
   container: { height: '100%', overflow: 'auto', background: '#f8f7f4' },
+  emergencyCard: { background: "#fff", borderRadius: 16, padding: 20, border: "2px solid #FBF5E6", marginBottom: 20 },
+  emergencyTitle: { fontSize: 16, fontWeight: 700, color: "#1A1A1A" },
+  countrySelect: { padding: "6px 10px", border: "1px solid #E8E4DE", borderRadius: 6, fontSize: 12, cursor: "pointer" },
+  emergencyHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 },
+  emergencyGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(80px, 1fr))", gap: 10 },
+  emergencyBtn: { display: "flex", flexDirection: "column", alignItems: "center", padding: 12, background: "#FBF5E6", borderRadius: 10, textDecoration: "none", border: "1px solid #E8E4DE", cursor: "pointer" },
+  emergencyLabel: { fontSize: 11, fontWeight: 600, color: "#1A1A1A", marginTop: 6 },
+  emergencyNumber: { fontSize: 12, fontWeight: 700, color: "#C9A84C", marginTop: 4 },
   header: { padding: '32px 32px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' },
   title: { fontSize: 26, fontWeight: 700, color: '#1A1A1A', fontFamily: "'DM Serif Display', serif" },
   subtitle: { fontSize: 14, color: '#9B9590', marginTop: 2 },
