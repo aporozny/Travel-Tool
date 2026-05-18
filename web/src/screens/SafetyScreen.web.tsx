@@ -32,6 +32,8 @@ export default function SafetyScreen() {
 
   // Location tracking
   const [currentLocation, setCurrentLocation] = useState<any>(null);
+  const [emergencyNumbers, setEmergencyNumbers] = useState<any[]>([]);
+  const [currentCountry, setCurrentCountry] = useState('AU');
   const [locationHistory, setLocationHistory] = useState<any[]>([]);
   const [postingLocation, setPostingLocation] = useState(false);
   const [geoError, setGeoError] = useState<string | null>(null);
@@ -60,11 +62,13 @@ export default function SafetyScreen() {
       api.get('/safety/trips').catch(() => ({ data: [] })),
       api.get('/safety/verification/status').catch(() => ({ data: { status: 'none' } })),
       api.get('/safety/location/history?limit=10').catch(() => ({ data: [] })),
+      api.get(`/safety/emergency-numbers?country=${currentCountry}`).catch(() => ({ data: { numbers: [] } })),
     ]).then(([c, t, v, h]) => {
       setContacts(c.data || []);
       setTrips(t.data || []);
       setVerification(v.data || { status: 'none' });
       setLocationHistory(h.data || []);
+      setEmergencyNumbers(e.data?.numbers || []);
     }).finally(() => setLoading(false));
   }, []);
 
