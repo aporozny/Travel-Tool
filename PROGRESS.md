@@ -133,3 +133,21 @@ Next session: Emergency UI, nearby members alert, fake call feature
 - Re-seed places_cache using Google Places API v1 to get correct photo names
 - Re-seed community posts, reactions, trips
 - Build waitlist system
+
+## Session — June 16 2026 (evening)
+
+### Completed
+- Waitlist system fully built and working
+- Migration 022 (waitlist table)
+- Backend routes: POST /waitlist, GET /waitlist/check, GET /waitlist/invite/:token
+- Admin routes: GET /admin/waitlist, POST /admin/waitlist/:id/approve
+- LoginScreen updated: waitlist form replaces registration, invite-only signup
+- Admin panel at http://100.67.86.49/admin.html (standalone HTML, no SPA conflicts)
+- Full workflow tested: join waitlist, approve, generate invite link, copy and send
+- sarah.chen@drifttest.com set as admin user for testing
+- All committed to GitHub
+
+### Next session
+- Re-seed community posts, reactions, trips (database was reset)
+- Sort Google Cloud project for Places API photos
+- DNS for drifttravel.app (Namecheap
