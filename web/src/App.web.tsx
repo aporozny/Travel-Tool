@@ -5,6 +5,7 @@ import LoginScreen from './screens/LoginScreen.web';
 import AppShell from './screens/AppShell.web';
 import OnboardingScreen from './screens/OnboardingScreen.web';
 import api from './services/api.web';
+import AdminWaitlist from './screens/AdminWaitlist.web';
 
 export default function App() {
   const { isAuthenticated, user } = useSelector((s: RootState) => s.auth);
@@ -26,6 +27,7 @@ export default function App() {
       .finally(() => setChecking(false));
   }, [isAuthenticated, user]);
 
+  if (window.location.pathname.startsWith('/admin')) return <AdminWaitlist />;
   if (!isAuthenticated) return <LoginScreen />;
   if (checking) return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', color: '#999' }}>Loading...</div>;
   if (!onboardingDone) return <OnboardingScreen onComplete={() => setOnboardingDone(true)} />;
