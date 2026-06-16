@@ -129,14 +129,29 @@ export async function fetchPhotoBuffer(
 ): Promise<{ data: Buffer; contentType: string }> {
   if (!GOOGLE_API_KEY) throw new Error('GOOGLE_PLACES_API_KEY not set');
 
+  // New Places API v1 format: "places/{place_id}/photos/{photo_id}"
+  if (photoReference.startsWith('places/')) {
+    const url = `https://places.googleapis.com/v1/${photoReference}/media`;
+    const response = await axios.get(url, {
+      params: { maxWidthPx: maxWidth, key: GOOGLE_API_KEY, skipHttpRedirect: true },
+      responseType: 'arraybuffer',
+      maxRedirects: 5,
+    });
+    return {
+      data: Buffer.from(response.data),
+      contentType: response.headers['content-type'] || 'image/jpeg',
+    };
+  }
+
+  // Legacy format
   const response = await axios.get(
     'https://maps.googleapis.com/maps/api/place/photo',
     {
       params: { maxwidth: maxWidth, photo_reference: photoReference, key: GOOGLE_API_KEY },
       responseType: 'arraybuffer',
+      maxRedirects: 5,
     }
   );
-
   return {
     data: Buffer.from(response.data),
     contentType: response.headers['content-type'] || 'image/jpeg',

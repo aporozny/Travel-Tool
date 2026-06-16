@@ -14,7 +14,7 @@ photosRouter.get('/', async (req: Request, res: Response) => {
   }
 
   // Validate ref format - Google photo refs are alphanumeric + hyphens/underscores
-  if (!/^[A-Za-z0-9_\-]+$/.test(ref)) {
+  if (!/^[A-Za-z0-9_\-\/]+$/.test(ref)) {
     return res.status(400).json({ message: 'Invalid photo reference' });
   }
 
