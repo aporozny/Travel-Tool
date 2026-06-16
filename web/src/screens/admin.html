@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Drift Admin — Waitlist</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'DM Sans', sans-serif; background: #f8f7f4; padding: 32px; color: #1A1A1A; }
+h1 { font-size: 22px; font-weight: 700; color: #C9A84C; margin-bottom: 4px; }
+.sub { font-size: 13px; color: #9B9590; margin-bottom: 24px; }
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid #F0EDE8; margin-bottom: 20px; }
+.tab { padding: 8px 16px; border: none; background: none; cursor: pointer; font-size: 14px; color: #9B9590; font-weight: 500; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.tab.active { color: #C9A84C; border-bottom-color: #C9A84C; font-weight: 600; }
+.card { background: #fff; border-radius: 12px; padding: 16px; border: 1px solid #F0EDE8; margin-bottom: 8px; }
+.row { display: flex; align-items: flex-start; gap: 12px; }
+.avatar { width: 36px; height: 36px; border-radius: 50%; background: #FBF5E6; color: #A8893A; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700; flex-shrink: 0; }
+.name { font-size: 15px; font-weight: 600; }
+.email { font-size: 13px; color: #9B9590; margin-top: 2px; }
+.meta { display: flex; gap: 8px; margin-top: 4px; align-items: center; }
+.tag { font-size: 11px; background: #FBF5E6; color: #A8893A; border-radius: 4px; padding: 1px 6px; }
+.date { font-size: 12px; color: #9B9590; }
+.note { font-size: 13px; color: #666; margin-top: 6px; font-style: italic; }
+.status { font-size: 11px; font-weight: 600; border-radius: 20px; padding: 3px 10px; }
+.status.waiting { background: #f5f3ef; color: #9B9590; }
+.status.invited { background: #EFF6FF; color: #1D4ED8; }
+.status.joined { background: #ECFDF5; color: #10B981; }
+.approve-btn { background: #C9A84C; color: #fff; border: none; border-radius: 8px; padding: 7px 14px; font-size: 12px; font-weight: 600; cursor: pointer; margin-top: 8px; }
+.invite-box { margin-top: 12px; padding: 10px 12px; background: #ECFDF5; border-radius: 8px; display: flex; align-items: center; gap: 12px; }
+.invite-url { font-size: 12px; color: #1D4ED8; flex: 1; word-break: break-all; }
+.copy-btn { background: #10B981; color: #fff; border: none; border-radius: 6px; padding: 5px 12px; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.error { background: #FFEBEE; color: #C62828; padding: 10px 14px; border-radius: 8px; margin-bottom: 16px; font-size: 13px; }
+.empty { color: #9B9590; padding: 32px; text-align: center; }
+.counts { display: flex; gap: 16px; margin-bottom: 20px; }
+.count-item { font-size: 13px; color: #9B9590; }
+.count-item strong { color: #1A1A1A; }
+#login-form { max-width: 360px; margin: 80px auto; background: #fff; border-radius: 16px; padding: 32px; }
+#login-form h2 { margin-bottom: 20px; }
+#login-form input { width: 100%; padding: 10px 12px; border: 1px solid #E8E4DE; border-radius: 8px; font-size: 14px; margin-bottom: 12px; }
+#login-form button { width: 100%; padding: 12px; background: #C9A84C; color: #fff; border: none; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; }
+</style>
+</head>
+<body>
+
+<div id="login-form" style="display:none">
+  <h2>◈ Drift Admin</h2>
+  <input type="email" id="admin-email" placeholder="Email" />
+  <input type="password" id="admin-pass" placeholder="Password" />
+  <div id="login-error" class="error" style="display:none"></div>
+  <button onclick="doLogin()">Sign in</button>
+</div>
+
+<div id="app" style="display:none">
+  <h1>◈ Drift — Waitlist</h1>
+  <div class="sub" id="counts-display">Loading...</div>
+
+  <div class="tabs">
+    <button class="tab active" onclick="setFilter('waiting', this)">Waiting</button>
+    <button class="tab" onclick="setFilter('invited', this)">Invited</button>
+    <button class="tab" onclick="setFilter('joined', this)">Joined</button>
+  </div>
+
+  <div id="entries">Loading...</div>
+</div>
+
+<script>
+const BASE = '/api/v1';
+let token = localStorage.getItem('drift_admin_token');
+let currentFilter = 'waiting';
+
+async function api(method, path, data) {
+  const opts = {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+  };
+  if (token) opts.headers['Authorization'] = 'Bearer ' + token;
+  if (data) opts.body = JSON.stringify(data);
+  const r = await fetch(BASE + path, opts);
+  if (!r.ok) throw await r.json();
+  return r.json();
+}
+
+async function doLogin() {
+  const email = document.getElementById('admin-email').value;
+  const pass = document.getElementById('admin-pass').value;
+  try {
+    const r = await api('POST', '/auth/login', { email, password: pass });
+    token = r.accessToken;
+    localStorage.setItem('drift_admin_token', token);
+    showApp();
+  } catch(e) {
+    document.getElementById('login-error').style.display = 'block';
+    document.getElementById('login-error').textContent = 'Invalid credentials';
+  }
+}
+
+async function showApp() {
+  // Check if admin
+  try {
+    await api('GET', '/admin/waitlist');
+    document.getElementById('login-form').style.display = 'none';
+    document.getElementById('app').style.display = 'block';
+    loadEntries();
+  } catch(e) {
+    if (e.message === 'Admin access required') {
+      document.getElementById('login-form').style.display = 'block';
+      document.getElementById('login-error').style.display = 'block';
+      document.getElementById('login-error').textContent = 'This account does not have admin access.';
+    } else {
+      document.getElementById('login-form').style.display = 'block';
+    }
+  }
+}
+
+async function loadEntries() {
+  try {
+    const r = await api('GET', '/admin/waitlist?status=' + currentFilter);
+    const counts = r.counts || {};
+    const total = Object.values(counts).reduce((a, b) => a + b, 0);
+    document.getElementById('counts-display').textContent =
+      `${total} total · ${counts.waiting || 0} waiting · ${counts.invited || 0} invited · ${counts.joined || 0} joined`;
+
+    const entries = r.entries || [];
+    if (!entries.length) {
+      document.getElementById('entries').innerHTML = '<div class="empty">No ' + currentFilter + ' entries.</div>';
+      return;
+    }
+
+    document.getElementById('entries').innerHTML = entries.map(e => `
+      <div class="card" id="entry-${e.id}">
+        <div class="row">
+          <div class="avatar">${(e.name || e.email).charAt(0).toUpperCase()}</div>
+          <div style="flex:1">
+            <div class="name">${e.name || '—'}</div>
+            <div class="email">${e.email}</div>
+            <div class="meta">
+              ${e.source ? `<span class="tag">${e.source}</span>` : ''}
+              <span class="date">${new Date(e.created_at).toLocaleDateString('en-AU', {day:'numeric',month:'short',year:'numeric'})}</span>
+            </div>
+            ${e.note ? `<div class="note">${e.note}</div>` : ''}
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px">
+            <span class="status ${e.status}">${e.status}</span>
+            ${e.status === 'waiting' ? `<button class="approve-btn" onclick="approve('${e.id}', '${e.email}')">Approve</button>` : ''}
+            ${e.invite_token ? `<button class="copy-btn" onclick="copyLink('${e.invite_token}', this)">Copy invite</button>` : ''}
+          </div>
+        </div>
+        ${e.invite_token ? `
+          <div class="invite-box">
+            <span class="invite-url">${window.location.origin}/invite/${e.invite_token}</span>
+          </div>
+        ` : ''}
+      </div>
+    `).join('');
+  } catch(e) {
+    document.getElementById('entries').innerHTML = '<div class="error">Could not load entries.</div>';
+  }
+}
+
+async function approve(id, email) {
+  try {
+    const r = await api('POST', '/admin/waitlist/' + id + '/approve');
+    alert('Approved! Invite link copied below.\n\n' + r.invite_url);
+    try { navigator.clipboard.writeText(r.invite_url); } catch(e) { prompt('Copy this invite link:', r.invite_url); }
+    loadEntries();
+  } catch(e) {
+    alert(e.message || 'Could not approve.');
+  }
+}
+
+function copyLink(token, btn) {
+  const url = window.location.origin + '/invite/' + token;
+  navigator.clipboard.writeText(url);
+  btn.textContent = '✓ Copied';
+  setTimeout(() => btn.textContent = 'Copy invite', 2000);
+}
+
+function setFilter(f, el) {
+  currentFilter = f;
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  loadEntries();
+}
+
+// Init
+if (token) {
+  showApp();
+} else {
+  document.getElementById('login-form').style.display = 'block';
+}
+</script>
+</body>
+</html>

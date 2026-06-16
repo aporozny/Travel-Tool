@@ -7,7 +7,16 @@ import OnboardingScreen from './screens/OnboardingScreen.web';
 import api from './services/api.web';
 import AdminWaitlist from './screens/AdminWaitlist.web';
 
-export default function App() {
+function AdminWrapper() {
+  if (window.location.pathname.startsWith('/admin')) {
+    return <AdminWaitlist />;
+  }
+  return <AppInner />;
+}
+
+export default AdminWrapper;
+
+function AppInner() {
   const { isAuthenticated, user } = useSelector((s: RootState) => s.auth);
   const [onboardingDone, setOnboardingDone] = useState<boolean | null>(null);
   const [checking, setChecking] = useState(true);
