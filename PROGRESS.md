@@ -119,3 +119,17 @@ Production ready features: Location tracking
 Testing needed: Emergency UI integration
 
 Next session: Emergency UI, nearby members alert, fake call feature
+
+## Session — June 16 2026 (afternoon)
+
+### Completed
+- Identified project was in wrong directory (/home/andre/projects/drift not /home/travel-tool)
+- Ran migrations 020 and 021 against correct database
+- Fixed places_cache expiry (all 864 records had expired)
+- Recommendations working again
+- Identified photo issue — Ab43m references are new Places API format, incompatible with old endpoint
+
+### Next session
+- Re-seed places_cache using Google Places API v1 to get correct photo names
+- Re-seed community posts, reactions, trips
+- Build waitlist system
