@@ -13,6 +13,7 @@ const REGIONS = [
   'Seminyak', 'Canggu', 'Ubud', 'Nusa Penida', 'Uluwatu',
   'Sanur', 'Amed', 'Tulamben', 'Lombok', 'Gili Islands',
   'Flores', 'Sidemen', 'Munduk', 'Lovina', 'Jimbaran',
+  'Saranda', 'Ksamil', 'Gjirokastra', 'Himara', 'Dhermi',
 ];
 
 function PhotoUrl(ref: string): string {
