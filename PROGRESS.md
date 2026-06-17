@@ -166,3 +166,22 @@ Next session: Emergency UI, nearby members alert, fake call feature
 - Seed Albania locations
 - Re-seed community posts and trips
 - DNS for drifttravel.app
+
+## Session — June 17 2026 (evening)
+
+### Completed
+- master.sql created — complete idempotent schema, auto-runs on startup
+- runMigrations.ts created — wires master.sql into backend startup
+- DATABASE_GUIDE.md and INCIDENT_AND_DATA_PROTECTION.md created
+- Test accounts recreated via API (8 users, password DriftTest2026!)
+- Cloudflare DNS configured — drifttravel.app → 115.64.73.50
+- Namecheap nameservers updated to Cloudflare (nataly/quentin)
+- DNS propagation in progress
+
+### Next session
+- Verify DNS propagated: dig drifttravel.app +short
+- Run Certbot for SSL: certbot --nginx -d drifttravel.app
+- Wire runMigrations.ts into backend index.ts
+- Set up daily pg_dump backup cron
+- Re-seed community posts and trips
+- Build country/region separation in Explore (multi-agent plan done)
