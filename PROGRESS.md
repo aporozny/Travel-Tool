@@ -151,3 +151,18 @@ Next session: Emergency UI, nearby members alert, fake call feature
 - Re-seed community posts, reactions, trips (database was reset)
 - Sort Google Cloud project for Places API photos
 - DNS for drifttravel.app (Namecheap
+
+## Session — June 17 2026
+
+### Completed
+- Photos fully working with Google Places API v1 (New)
+- Places API (New) enabled on correct Google Cloud project (orbital-builder-491904-s4)
+- 557 places re-seeded with new format photo names
+- Photo proxy fixed: removed skipHttpRedirect, added URL decode for slash characters
+- Recommendations filtered to google_places_v2 source only
+- All committed to GitHub
+
+### Next
+- Seed Albania locations
+- Re-seed community posts and trips
+- DNS for drifttravel.app
