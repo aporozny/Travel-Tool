@@ -253,8 +253,10 @@ function scoreOperator(
   else if (rating > 0) breakdown.rating_boost = 1;
 
   // --- Claimed/verified bonus (+5) ---
-  if (op.is_claimed || op.is_verified) {
-    breakdown.claimed_bonus = 5;
+  if (op.is_verified) {
+    breakdown.claimed_bonus = 20;
+  } else if (op.is_claimed) {
+    breakdown.claimed_bonus = 8;
   }
 
   return breakdown;

@@ -10,7 +10,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - travel-tool_postgres_data:/var/lib/postgresql/data
       - ./backend/src/utils/schema.sql:/docker-entrypoint-initdb.d/schema.sql
   redis:
     image: redis:7-alpine
@@ -45,5 +45,6 @@ services:
       - ./backend/src:/app/src
       - /var/www/drift/uploads:/app/uploads
 volumes:
-  postgres_data:
+  travel-tool_postgres_data:
+    external: true
   redis_data:
