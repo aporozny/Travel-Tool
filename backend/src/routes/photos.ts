@@ -14,7 +14,8 @@ photosRouter.get('/', async (req: Request, res: Response) => {
   }
 
   // Validate ref format - Google photo refs are alphanumeric + hyphens/underscores
-  if (!/^[A-Za-z0-9_\-\/]+$/.test(ref)) {
+  const decodedRef = decodeURIComponent(ref);
+  if (!/^[A-Za-z0-9_\-\/]+$/.test(decodedRef)) {
     return res.status(400).json({ message: 'Invalid photo reference' });
   }
 
@@ -22,7 +23,7 @@ photosRouter.get('/', async (req: Request, res: Response) => {
 
   try {
     // Cache photo in Redis for 24h to avoid hammering Google
-    const cacheKey = `photo:${ref}:${maxWidth}`;
+    const cacheKey = `photo:${decodedRef}:${maxWidth}`;
     const cached = await redis.getBuffer(cacheKey);
 
     if (cached) {
@@ -31,7 +32,7 @@ photosRouter.get('/', async (req: Request, res: Response) => {
       return res.send(cached);
     }
 
-    const { data, contentType } = await fetchPhotoBuffer(ref, maxWidth);
+    const { data, contentType } = await fetchPhotoBuffer(decodedRef, maxWidth);
 
     // Cache for 24 hours
     await redis.setex(cacheKey, 86400, data);

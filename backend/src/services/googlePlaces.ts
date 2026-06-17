@@ -133,7 +133,7 @@ export async function fetchPhotoBuffer(
   if (photoReference.startsWith('places/')) {
     const url = `https://places.googleapis.com/v1/${photoReference}/media`;
     const response = await axios.get(url, {
-      params: { maxWidthPx: maxWidth, key: GOOGLE_API_KEY, skipHttpRedirect: true },
+      params: { maxWidthPx: maxWidth, key: GOOGLE_API_KEY },
       responseType: 'arraybuffer',
       maxRedirects: 5,
     });
