@@ -185,3 +185,36 @@ Next session: Emergency UI, nearby members alert, fake call feature
 - Set up daily pg_dump backup cron
 - Re-seed community posts and trips
 - Build country/region separation in Explore (multi-agent plan done)
+
+## Session — June 18 2026
+
+### Context
+DNS configured the night before (drifttravel.app → 115.64.73.50 via Cloudflare), propagating. Started session to verify test accounts and continue toward public launch.
+
+### What happened
+- Verified test accounts working: sarah.chen@drifttest.com (admin) logs in, returns valid access/refresh tokens. Users table = 11, travelers = 8, operators = 2 — all intact.
+- Discovered places_cache was EMPTY (0 rows) on the live database again.
+- Root cause found (deeper than previous "expiry" symptom): the live postgres container `traveller-postgres` is mounted on volume `postgres_data`, but the seeded places live in a DIFFERENT volume `drift_postgres_data`. Three postgres volumes exist on the box: `postgres_data` (live — users/travelers/operators), `drift_postgres_data` (places — 1705 rows), `travel-tool_postgres_data` (uninspected). This is the same multi-volume split that caused the original data-loss incident.
+- The two volumes also have DIFFERENT places_cache schemas: the drift_postgres_data dump has `claimed_at` + `last_fetched_at`; the live postgres_data table has `updated_at` instead. Direct restore failed on column mismatch.
+
+### Recovery performed (non-destructive, reviewed before running)
+1. Probed the other two volumes read-only using throwaway `--rm` containers — found 864 google + 841 google_places_v2 = 1705 rows in `drift_postgres_data`.
+2. Dumped places_cache from that volume (`pg_dump --table=places_cache --data-only`).
+3. Extracted the 1705 TSV data rows, loaded into a STAGING table (`places_cache_staging`) whose columns matched the DUMP schema exactly (no constraints, so COPY couldn't fail).
+4. `INSERT … SELECT` from staging into live places_cache, carrying ONLY the columns both schemas share. Dropped `claimed_at`/`last_fetched_at`; let `updated_at` use default. Nulled `claimed_by`/`operator_id` to avoid FK failures (place claim state not preserved — re-link later if needed).
+5. Dropped staging table. Verified live places_cache = 1705 rows, all non-expired (expire June 2027).
+6. Recommendations endpoint initially STILL returned 0 — cause was a STALE REDIS CACHE. Empty recommendation results had been cached under `rec:<userId>:*` with a 1-hour TTL while the table was empty. Cleared `rec:*` keys. Endpoint then returned 20 results correctly.
+
+### Verified working at end of session
+- places_cache: 1705 rows (841 google_places_v2 + 864 google), non-expired
+- GET /api/v1/recommendations/ returns 20 results for sarah.chen
+- Login, users/travelers/operators all intact
+
+### STILL OUTSTANDING — root cause NOT yet fixed
+- **Volume split unresolved.** Three postgres volumes still exist. A routine `docker restart`/`up` can still land the container on the wrong volume. NEXT: pin docker-compose.yml to ONE named external volume; confirm canonical volume; document the orphans. DO NOT delete any volume until certain.
+- **Daily pg_dump backup missing.** Expected `drift_*.sql` dumps are NOT in /home/andre/backups (only tarballs/openclaw/n8n). Cron either not installed or writing elsewhere. Install + verify it produces a file.
+- **Place claim links nulled** during restore — operator/claim associations on places not preserved.
+- DNS/SSL: verify propagation (`dig drifttravel.app +short`), run Certbot for SSL.
+
+### Process note
+This session followed read-before-touch discipline: located data via read-only probes, wrote the recovery plan for review before executing, ran one reviewed command block at a time, used staging instead of editing a 3MB dump, and made no destructive changes to the live database or its volume.
