@@ -218,3 +218,48 @@ DNS configured the night before (drifttravel.app → 115.64.73.50 via Cloudflare
 
 ### Process note
 This session followed read-before-touch discipline: located data via read-only probes, wrote the recovery plan for review before executing, ran one reviewed command block at a time, used staging instead of editing a 3MB dump, and made no destructive changes to the live database or its volume.
+
+## Session — June 18 2026 (afternoon) — Volume root-cause fix + backups
+
+### Root cause finally identified and fixed
+The recurring "database looks empty / wrong data after restart" incidents trace to ONE cause:
+the `traveller-postgres` container was created by a plain `docker run`, NOT by docker-compose.
+It had ZERO `com.docker.compose.*` labels. Consequences:
+- compose couldn't manage/replace it → name-conflict on every `docker-compose up`
+- the running container was on volume `postgres_data` while docker-compose.yml declared
+  `travel-tool_postgres_data` — so the next clean compose recreate would have mounted the
+  WRONG (stale) volume and "lost" all data.
+
+### Fixes applied (all verified, backup in hand throughout)
+1. **Verified backup first.** `pg_dump -Fc` of live DB → restored into a throwaway plain
+   `postgres:15` container → counts matched (users=11, places=1705, travelers=8). Backup proven good.
+   (Note: postgis image crashed on restore 3x — unrelated to backup validity; plain postgres image worked.)
+2. **Fixed docker-compose.yml** — postgres volume changed `travel-tool_postgres_data` → `postgres_data`,
+   kept `external: true`. Verified with `docker-compose config` that it resolves to `postgres_data`
+   with NO project prefix (external honored). Backup of compose at docker-compose.yml.bak.
+3. **Removed stale May-17 container corpse** (`d842f866d727_traveller-postgres`, Exited) that was
+   causing name conflicts.
+4. **Replaced hand-run container with compose-managed one:**
+   - stopped + removed hand-run `traveller-postgres` (volume `postgres_data` untouched — data lives in volume)
+   - `docker-compose up -d --no-deps postgres` created a FRESH compose-managed container
+   - verified: mount=postgres_data, compose labels NOW present (project=drift, service=postgres),
+     counts unchanged (11/1705/2/8), login works (LOGIN OK).
+   - The wrong-volume landmine is now defused — future restarts land on the right volume cleanly.
+
+### Daily backups installed
+- Script: /home/andre/backups/drift-db/backup.sh (pg_dump -Fc, keeps 7 most recent)
+- Cron: `0 2 * * *` (2am AEST — confirmed box tz = Australia/Sydney) → logs to backup.log
+- Test run succeeded; two dumps present.
+
+### Current verified state
+- postgres: compose-managed, volume postgres_data, all data intact
+- users=11, places_cache=1705, operators=2, travelers=8
+- login working, recommendations returning results
+- daily backup scheduled + proven restorable
+
+### Still outstanding (lower priority now)
+- Orphan volumes `drift_postgres_data` and `travel-tool_postgres_data` still exist (kept as cold
+  copies — do NOT delete until a few days of stable backups confirmed)
+- Place claim links (claimed_by/operator_id) were nulled during this morning's places restore
+- DNS/SSL: verify drifttravel.app propagation, run Certbot
+- NEVER `docker run` postgres by hand again — only via docker-compose (see CONTRIBUTING.md)

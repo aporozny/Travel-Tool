@@ -53,3 +53,36 @@ Recommendations are cached per user under `rec:<userId>:<category>:<region>` wit
 ```bash
 docker exec traveller-redis redis-cli --scan --pattern "rec:*" | xargs -r -I{} docker exec traveller-redis redis-cli DEL "{}"
 ```
+
+### Postgres MUST stay compose-managed (root cause of repeated data scares)
+
+**Never start postgres with a plain `docker run`.** Always bring it up via docker-compose:
+```bash
+cd /home/andre/projects/drift && docker-compose up -d
+```
+
+Why: a hand-run container has no `com.docker.compose.*` labels, so docker-compose can't manage it.
+It then refuses to replace it (name conflict), and worse, the running container can end up on a
+DIFFERENT volume than docker-compose.yml declares — so the next clean `docker-compose up` mounts
+the wrong (stale) volume and the database appears wiped. This caused multiple "data loss" incidents
+that were actually wrong-volume mounts.
+
+**Verify postgres is compose-managed:**
+```bash
+docker inspect traveller-postgres --format '{{ json .Config.Labels }}' | grep compose
+```
+Must show `com.docker.compose.project: drift`. If it shows ONLY postgis image labels, the container
+is hand-run and must be recreated via compose (stop+rm the container — the external volume keeps the
+data — then `docker-compose up -d --no-deps postgres`).
+
+**Canonical volume:** `postgres_data` (declared `external: true` in docker-compose.yml). This is the
+volume with live data. Two orphan volumes exist (`drift_postgres_data`, `travel-tool_postgres_data`) —
+do NOT mount or delete them without checking contents first (see volume-probe procedure above).
+
+### Backups
+- Daily automated: cron `0 2 * * *` runs /home/andre/backups/drift-db/backup.sh (2am AEST), keeps 7 days.
+- Manual backup any time: `/home/andre/backups/drift-db/backup.sh`
+- Restore (custom format): `docker exec -i traveller-postgres pg_restore -U traveller -d traveller_dev --clean --if-exists --no-owner < /path/to/dump`
+- To VERIFY a backup without touching live: restore into a throwaway `postgres:15` container
+  (NOT postgis — it crashes on restore) and count rows. Operators table needs postgis so it will
+  error on plain postgres; judge by users/places_cache/travelers counts.
