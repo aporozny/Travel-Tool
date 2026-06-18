@@ -21,18 +21,55 @@ const REGIONS = [
   'Sanur','Amed','Tulamben','Lombok','Gili Islands','Flores','Sidemen',
 ];
 
+type TripStatus = 'planned' | 'active' | 'overdue' | 'completed' | 'escalated';
+type VerifyStatus = 'none' | 'pending' | 'submitted' | 'processing' | 'verified' | 'failed' | 'expired' | 'requires_input';
+
+interface Contact {
+  id: string;
+  name: string;
+  email?: string;
+  phone?: string;
+  relationship?: string;
+  can_see_location?: boolean;
+  receives_sos?: boolean;
+}
+
+interface Trip {
+  id: string;
+  destination: string;
+  region?: string;
+  start_date?: string;
+  end_date?: string;
+  notes?: string;
+  is_public?: boolean;
+  safety_status: TripStatus;
+  next_checkin_due?: string;
+}
+
+interface LocationPoint {
+  latitude: number;
+  longitude: number;
+  recorded_at: string;
+}
+
+interface Verification {
+  status: VerifyStatus;
+}
+
+type Tab = 'overview' | 'trips' | 'contacts' | 'verify' | 'location';
+
 export default function SafetyScreen() {
-  const [tab, setTab] = useState<'overview'|'trips'|'contacts'|'verify'|'location'>('overview');
-  const [contacts, setContacts] = useState<any[]>([]);
-  const [trips, setTrips] = useState<any[]>([]);
-  const [verification, setVerification] = useState<any>({ status: 'none' });
+  const [tab, setTab] = useState<Tab>('overview');
+  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [trips, setTrips] = useState<Trip[]>([]);
+  const [verification, setVerification] = useState<Verification>({ status: 'none' });
   const [sosLoading, setSosLoading] = useState(false);
   const [sosResult, setSosResult] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   // Location tracking
-  const [currentLocation, setCurrentLocation] = useState<any>(null);
-  const [locationHistory, setLocationHistory] = useState<any[]>([]);
+  const [currentLocation, setCurrentLocation] = useState<LocationPoint | null>(null);
+  const [locationHistory, setLocationHistory] = useState<LocationPoint[]>([]);
   const [postingLocation, setPostingLocation] = useState(false);
   const [geoError, setGeoError] = useState<string | null>(null);
 
@@ -68,6 +105,11 @@ export default function SafetyScreen() {
     }).finally(() => setLoading(false));
   }, []);
 
+  const refreshTrips = async () => {
+    const updated = await api.get('/safety/trips');
+    setTrips(updated.data || []);
+  };
+
   const handlePostLocation = async () => {
     setPostingLocation(true);
     setGeoError(null);
@@ -91,7 +133,7 @@ export default function SafetyScreen() {
   };
 
   const handleSOS = async () => {
-    if (!window.confirm(`Send SOS alert to ${contacts.filter((c: any) => c.receives_sos).length} emergency contact(s)?`)) return;
+    if (!window.confirm(`Send SOS alert to ${contacts.filter(c => c.receives_sos).length} emergency contact(s)?`)) return;
     setSosLoading(true);
     try {
       const { data } = await api.post('/safety/sos', { message: 'SOS triggered from web app' });
@@ -138,8 +180,7 @@ export default function SafetyScreen() {
   const handleCheckin = async (tripId: string) => {
     try {
       await api.post('/safety/trips/checkin', { tripId });
-      const updated = await api.get('/safety/trips');
-      setTrips(updated.data || []);
+      await refreshTrips();
       alert('Checked in successfully!');
     } catch {
       alert('Check-in failed. Please try again.');
@@ -149,8 +190,7 @@ export default function SafetyScreen() {
   const handleStartTrip = async (tripId: string) => {
     try {
       await api.post(`/safety/trips/${tripId}/start`);
-      const updated = await api.get('/safety/trips');
-      setTrips(updated.data || []);
+      await refreshTrips();
     } catch {
       alert('Could not start trip.');
     }
@@ -160,8 +200,7 @@ export default function SafetyScreen() {
     if (!window.confirm('Mark this trip as complete?')) return;
     try {
       await api.post(`/safety/trips/${tripId}/complete`);
-      const updated = await api.get('/safety/trips');
-      setTrips(updated.data || []);
+      await refreshTrips();
     } catch {
       alert('Could not complete trip.');
     }
@@ -196,13 +235,14 @@ export default function SafetyScreen() {
     if (!window.confirm('Remove this contact?')) return;
     try {
       await api.delete(`/safety/contacts/${id}`);
-      setContacts(prev => prev.filter((c: any) => c.id !== id));
+      setContacts(prev => prev.filter(c => c.id !== id));
     } catch {}
   };
 
   const verifyStatus = verification.status;
   const verifyColour = verifyStatus === 'verified' ? C.green : verifyStatus === 'pending' || verifyStatus === 'processing' ? C.gold : C.muted;
-  const verifyLabel = { none: 'Not verified', pending: 'Pending', submitted: 'Submitted', processing: 'Processing', verified: 'Verified', failed: 'Failed', expired: 'Expired' }[verifyStatus] || 'Unknown';
+  const verifyLabels: Partial<Record<VerifyStatus, string>> = { none: 'Not verified', pending: 'Pending', submitted: 'Submitted', processing: 'Processing', verified: 'Verified', failed: 'Failed', expired: 'Expired' };
+  const verifyLabel = verifyLabels[verifyStatus] || 'Unknown';
 
   const TABS = [
     { key: 'overview', label: 'Overview' },
@@ -258,10 +298,10 @@ export default function SafetyScreen() {
                 </div>
               </div>
               <div style={s.statusCard} onClick={() => setTab('trips')}>
-                <div style={{ ...s.statusDot, background: trips.filter((t: any) => t.safety_status === 'active').length > 0 ? C.green : C.muted }} />
+                <div style={{ ...s.statusDot, background: trips.filter(t => t.safety_status === 'active').length > 0 ? C.green : C.muted }} />
                 <div>
                   <div style={s.statusLabel}>Active trips</div>
-                  <div style={s.statusValue}>{trips.filter((t: any) => t.safety_status === 'active').length}</div>
+                  <div style={s.statusValue}>{trips.filter(t => t.safety_status === 'active').length}</div>
                 </div>
               </div>
               <div style={s.statusCard} onClick={() => setTab('contacts')}>
@@ -274,7 +314,7 @@ export default function SafetyScreen() {
             </div>
 
             {/* Overdue warning */}
-            {trips.some((t: any) => t.safety_status === 'overdue') && (
+            {trips.some(t => t.safety_status === 'overdue') && (
               <div style={s.overdueAlert}>
                 ⚠ You have overdue check-ins. Go to Trips to check in now.
               </div>
@@ -325,8 +365,9 @@ export default function SafetyScreen() {
                 <p style={s.emptyDesc}>Plan a trip to enable check-ins and let the community know where you are headed.</p>
               </div>
             ) : (
-              trips.map((trip: any) => {
-                const statusColour = { active: C.green, overdue: C.red, completed: C.muted, planned: C.gold, escalated: C.red }[trip.safety_status] || C.muted;
+              trips.map(trip => {
+                const colours: Record<TripStatus, string> = { active: C.green, overdue: C.red, completed: C.muted, planned: C.gold, escalated: C.red };
+                const statusColour = colours[trip.safety_status] || C.muted;
                 return (
                   <div key={trip.id} style={s.tripCard}>
                     <div style={s.tripHeader}>
@@ -400,7 +441,7 @@ export default function SafetyScreen() {
               </div>
             ) : (
               <div style={s.locationList}>
-                {locationHistory.map((loc: any, idx: number) => (
+                {locationHistory.map((loc, idx) => (
                   <div key={idx} style={s.locationItem}>
                     <div style={s.locTime}>{new Date(loc.recorded_at).toLocaleString()}</div>
                     <div style={s.locCoords}>
@@ -455,7 +496,7 @@ export default function SafetyScreen() {
               </div>
             ) : (
               <div style={s.contactList}>
-                {contacts.map((c: any) => (
+                {contacts.map(c => (
                   <div key={c.id} style={s.contactCard}>
                     <div style={s.contactAvatar}>{c.name.charAt(0).toUpperCase()}</div>
                     <div style={{ flex: 1 }}>
@@ -612,5 +653,4 @@ const s: Record<string, React.CSSProperties> = {
   trustTitle: { fontSize: 12, fontWeight: 600, color: '#9B9590', letterSpacing: '0.8px', textTransform: 'uppercase' as const, marginBottom: 12 },
   trustRow: { display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 },
   trustDot: { width: 10, height: 10, borderRadius: '50%', flexShrink: 0 },
-  border: '#F0EDE8',
 };
