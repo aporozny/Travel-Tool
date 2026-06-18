@@ -59,3 +59,24 @@ Other live services that must never be disrupted: superpowers (nginx default_ser
 1. sudo systemctl stop cloudflared && sudo systemctl disable cloudflared
 2. Remove the proxied CNAME in Cloudflare for drifttravel.app
 3. (Public access would then be gone — there is no port-forward fallback.)
+## Frontend rebuild — IMPORTANT (photo loss risk)
+
+The web build uses webpack with output.clean=true, which WIPES web/dist/ on every
+`npm run build`. Two operator photos (penida_photo.jpg, tapasita_1.jpg) are
+manually placed in dist/ and are NOT part of the build — so every rebuild deletes
+them. They must be restored after each build.
+
+Backups kept at: /root/drift-photos-backup/
+Restore after build:
+  cp /root/drift-photos-backup/*.jpg /home/andre/projects/drift/web/dist/
+
+TECH DEBT: this is fragile. Proper fix is to put these images in a source location
+webpack copies into the build (e.g. web/static/ via CopyWebpackPlugin), or serve
+them from the backend/nginx outside dist/. Until then, always restore after build.
+
+Build sequence that is known-safe:
+  1. cp web/dist/*.jpg /root/drift-photos-backup/   (back up current photos)
+  2. cd web && npm run build
+  3. cp /root/drift-photos-backup/*.jpg web/dist/    (restore)
+  4. hard-refresh browser (bundle filename changes each build)O
+

@@ -9,12 +9,22 @@ const CATEGORIES = [
   { key: 'transport', label: 'Transport' },
 ];
 
-const REGIONS = [
-  'Seminyak', 'Canggu', 'Ubud', 'Nusa Penida', 'Uluwatu',
-  'Sanur', 'Amed', 'Tulamben', 'Lombok', 'Gili Islands',
-  'Flores', 'Sidemen', 'Munduk', 'Lovina', 'Jimbaran',
-  'Saranda', 'Ksamil', 'Gjirokastra', 'Himara', 'Dhermi',
-];
+// Country -> regions (data-only: every region here has places in the DB)
+const DESTINATIONS: Record<string, string[]> = {
+  Bali: [
+    'Seminyak', 'Canggu', 'Ubud', 'Nusa Penida', 'Uluwatu',
+    'Sanur', 'Amed', 'Tulamben', 'Jimbaran', 'Kuta',
+  ],
+  Albania: [
+    'Saranda', 'Ksamil', 'Gjirokastra', 'Himara', 'Dhermi', 'Butrint',
+  ],
+};
+const COUNTRIES = Object.keys(DESTINATIONS);
+// Flat list of all regions (used for trip-destination matching)
+const REGIONS = COUNTRIES.flatMap(c => DESTINATIONS[c]);
+// Reverse lookup: region name -> its country
+const countryForRegion = (r: string): string =>
+  COUNTRIES.find(c => DESTINATIONS[c].includes(r)) || '';
 
 function PhotoUrl(ref: string): string {
   if (!ref) return '';
@@ -142,15 +152,23 @@ export default function ExploreScreen({ onSelectOperator, detail, onClearDetail 
   const [loading, setLoading] = useState(true);
   const [personalized, setPersonalized] = useState(false);
   const [category, setCategory] = useState('');
+  const [country, setCountry] = useState('Bali');
   const [region, setRegion] = useState('');
   const [search, setSearch] = useState('');
   const [saves, setSaves] = useState<Set<string>>(new Set());
   const [selected, setSelected] = useState<any>(null);
   const [activeTrips, setActiveTrips] = useState<any[]>([]);
 
-  // Restore saved region and load active trips
+  // Restore saved country/region and load active trips
   useEffect(() => {
+    const savedCountry = localStorage.getItem('drift_country');
     const saved = localStorage.getItem('drift_region');
+    if (savedCountry && COUNTRIES.includes(savedCountry)) {
+      setCountry(savedCountry);
+    } else if (saved) {
+      const c = countryForRegion(saved);
+      if (c) setCountry(c);
+    }
     if (saved) setRegion(saved);
 
     api.get('/safety/trips').then((r: any) => {
@@ -158,7 +176,7 @@ export default function ExploreScreen({ onSelectOperator, detail, onClearDetail 
         ['active', 'planned'].includes(t.safety_status)
       );
       setActiveTrips(active);
-      // Auto-set region from active trip if none saved
+      // Auto-set region (and its country) from active trip if none saved
       if (!saved && active.length > 0) {
         const dest = active[0].destination || '';
         const match = REGIONS.find(r =>
@@ -166,11 +184,26 @@ export default function ExploreScreen({ onSelectOperator, detail, onClearDetail 
         );
         if (match) {
           setRegion(match);
+          const c = countryForRegion(match);
+          if (c) {
+            setCountry(c);
+            localStorage.setItem('drift_country', c);
+          }
           localStorage.setItem('drift_region', match);
         }
       }
     }).catch(() => {});
   }, []);
+
+  const selectCountry = (c: string) => {
+    setCountry(c);
+    localStorage.setItem('drift_country', c);
+    // Clear region if it doesn't belong to the newly selected country
+    if (region && countryForRegion(region) !== c) {
+      setRegion('');
+      localStorage.removeItem('drift_region');
+    }
+  };
 
   const setDestination = (r: string) => {
     const next = region === r ? '' : r;
@@ -230,13 +263,20 @@ export default function ExploreScreen({ onSelectOperator, detail, onClearDetail 
     } catch {}
   };
 
+  // Scope results to the selected country: when no specific region is chosen,
+  // show only places whose region belongs to the active country.
+  const countryRegions = DESTINATIONS[country] || [];
+  const countryScoped = region
+    ? results
+    : results.filter(r => !r.region || countryRegions.includes(r.region));
+
   const filtered = search
-    ? results.filter(r =>
+    ? countryScoped.filter(r =>
         r.name?.toLowerCase().includes(search.toLowerCase()) ||
         r.region?.toLowerCase().includes(search.toLowerCase()) ||
         r.tags?.some((t: string) => t.includes(search.toLowerCase()))
       )
-    : results;
+    : countryScoped;
 
   if (selected) {
     return (
@@ -254,11 +294,24 @@ export default function ExploreScreen({ onSelectOperator, detail, onClearDetail 
     <div style={styles.container}>
       <div style={styles.header}>
 
+        {/* Country selector */}
+        <div style={styles.countryRow}>
+          {COUNTRIES.map(c => (
+            <button
+              key={c}
+              style={{ ...styles.countryPill, ...(country === c ? styles.countryPillActive : {}) }}
+              onClick={() => selectCountry(c)}
+            >
+              {c}
+            </button>
+          ))}
+        </div>
+
         {/* Destination picker */}
         <div style={styles.destinationSection}>
           <div style={styles.destinationHeader}>
             <span style={styles.destinationTitle}>
-              {region ? `Exploring ${region}` : 'Where are you going?'}
+              {region ? `Exploring ${region}` : `All of ${country}`}
             </span>
             {region && (
               <button style={styles.clearDest} onClick={() => setDestination(region)}>
@@ -278,7 +331,13 @@ export default function ExploreScreen({ onSelectOperator, detail, onClearDetail 
                   <button
                     key={t.id}
                     style={{ ...styles.destPill, ...styles.tripPill, ...(region === match ? styles.destPillActive : {}) }}
-                    onClick={() => match && setDestination(match)}
+                    onClick={() => {
+                      if (match) {
+                        const c = countryForRegion(match);
+                        if (c) selectCountry(c);
+                        setDestination(match);
+                      }
+                    }}
                   >
                     ✈ {t.destination}
                   </button>
@@ -287,9 +346,9 @@ export default function ExploreScreen({ onSelectOperator, detail, onClearDetail 
             </div>
           )}
 
-          {/* Region pills */}
+          {/* Region pills for the selected country */}
           <div style={styles.regionPills}>
-            {REGIONS.map(r => (
+            {countryRegions.map(r => (
               <button
                 key={r}
                 style={{ ...styles.destPill, ...(region === r ? styles.destPillActive : {}) }}
@@ -305,7 +364,7 @@ export default function ExploreScreen({ onSelectOperator, detail, onClearDetail 
         <div style={styles.searchRow}>
           <input
             style={styles.searchInput}
-            placeholder={region ? `Search in ${region}...` : 'Search by name, activity...'}
+            placeholder={region ? `Search in ${region}...` : `Search in ${country}...`}
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
@@ -333,13 +392,13 @@ export default function ExploreScreen({ onSelectOperator, detail, onClearDetail 
 
       {loading ? (
         <div style={styles.loading}>
-          {region ? `Finding the best of ${region} for you...` : 'Finding matches...'}
+          {region ? `Finding the best of ${region} for you...` : `Finding the best of ${country} for you...`}
         </div>
       ) : filtered.length === 0 ? (
         <div style={styles.empty}>
           {region
             ? `Nothing found in ${region}. Try a different category or clear the destination.`
-            : 'No results found. Try adjusting your filters.'}
+            : `Nothing found in ${country}. Try a different category.`}
         </div>
       ) : (
         <div style={styles.grid}>
@@ -362,6 +421,19 @@ export default function ExploreScreen({ onSelectOperator, detail, onClearDetail 
 const styles: Record<string, React.CSSProperties> = {
   container: { height: '100%', overflow: 'auto', background: '#f8f7f4' },
   header: { background: '#fff', borderBottom: '1px solid #F0EDE8', padding: '16px 20px', position: 'sticky', top: 0, zIndex: 10 },
+
+  // Country selector
+  countryRow: { display: 'flex', gap: 8, marginBottom: 14 },
+  countryPill: {
+    padding: '7px 18px', borderRadius: 22,
+    border: '1.5px solid #E8E4DE', background: '#fff',
+    fontSize: 14, cursor: 'pointer', color: '#666',
+    fontWeight: 600, whiteSpace: 'nowrap' as const,
+  },
+  countryPillActive: {
+    borderColor: '#C9A84C', background: '#C9A84C',
+    color: '#fff', fontWeight: 700,
+  },
 
   // Destination section
   destinationSection: { marginBottom: 12 },
