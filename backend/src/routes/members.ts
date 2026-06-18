@@ -40,7 +40,7 @@ const DIRECTORY_SELECT = `
     AND (
       mp.community_participation && ARRAY['meet_members', 'find_travel_buddies', 'share_reports', 'ask_questions']::text[]
     )
-    AND mp.content_sharing_comfort != 'private'
+    AND (mp.content_sharing_comfort IS NULL OR mp.content_sharing_comfort != 'private')
 `;
 
 // GET /api/v1/members
