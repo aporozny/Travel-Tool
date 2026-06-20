@@ -107,3 +107,33 @@ code, almost certainly from inserting into `scheduled_return`/
 `trip_checkins` table.
 
 - [x] Live behavior confirmed via direct test
+
+## Correction to Finding #2 (June 20 2026)
+
+The original "silent data loss" framing assumed the client still sends
+latitude/longitude/batteryPct/note since the Zod schema kept accepting
+them. This was never directly verified and is now disproven:
+
+grep -rn "trips/checkin|batteryPct" web/src
+SafetyScreen.web.tsx:182:      await api.post('/safety/trips/checkin', { tripId });
+SafetyScreen.web.tsx.backup:140:      await api.post('/safety/trips/checkin', { tripId });
+
+Web sends only { tripId } - and always has, even in the backup version.
+No client has ever sent location/battery/note on check-in.
+
+Revised severity for Finding #2: downgraded from "silent data loss" to
+"unused backend capability." The schema accepts fields no client populates.
+Not a regression, not currently losing real user data. Low priority.
+
+Findings #1 (authorization gap) and #3 (broken state machine) are
+unchanged and remain high severity - and matter more given this
+correction, since web genuinely does call this endpoint with real trip IDs
+from real users on every check-in attempt, and every one of those attempts
+fails right now (confirmed via live test).
+
+Mobile blast radius: none. Confirmed via grep across mobile/app/src -
+mobile has no trip check-in call at all. Its shareLocation() function hits
+the separate /safety/location endpoint instead. The fix is web-only.
+
+- [x] Finding #2 corrected after direct verification of client code
+- [x] Mobile blast radius confirmed: none
