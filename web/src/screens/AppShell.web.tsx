@@ -53,6 +53,7 @@ export default function AppShell() {
   }, [user]);
 
   const isOperator = user?.role === 'operator';
+  const isAdmin = user?.role === 'admin';
 
   const NAV_ITEMS: { key: Tab; label: string; icon: string; badge?: number }[] = isOperator
     ? [
@@ -116,6 +117,12 @@ export default function AppShell() {
               ) : null}
             </button>
           ))}
+          {isAdmin && (
+            <button style={styles.navItem} onClick={() => window.open('/admin.html', '_blank')}>
+              <span style={{ ...styles.navIcon, color: C.muted }}>⚙</span>
+              <span style={{ color: C.muted }}>Admin</span>
+            </button>
+          )}
         </nav>
 
         {/* Footer */}
