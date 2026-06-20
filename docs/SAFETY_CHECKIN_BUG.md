@@ -87,3 +87,23 @@ migration in addition to the route change. If they do, it's a route-only fix.
 - [ ] QA: test ownership rejection, status/due-date advancement, data persistence
 - [ ] Reviewer: confirm fix doesn't introduce new regressions
 - [ ] Shipper: commit + push
+
+## Empirical confirmation (June 20 2026)
+
+Ran a live test against the real API: created a controlled trip in
+`overdue` status, logged in as its actual owner, called
+`POST /api/v1/safety/trips/checkin`.
+
+**Result:** `500 Internal server error`, every time. `trip_checkins` for
+that trip remained empty after the call. `member_trips.safety_status` and
+`next_checkin_due` were unchanged.
+
+**Conclusion:** the check-in endpoint does not work at all right now, for
+any user. This is not a partial regression (some data silently dropped) —
+it is a complete failure. The earlier "silent data loss" framing is revised:
+nothing is saved at all, because the endpoint throws before reaching that
+code, almost certainly from inserting into `scheduled_return`/
+`checked_in_at`/`escalation_level`, none of which exist on the live
+`trip_checkins` table.
+
+- [x] Live behavior confirmed via direct test
