@@ -137,3 +137,37 @@ the separate /safety/location endpoint instead. The fix is web-only.
 
 - [x] Finding #2 corrected after direct verification of client code
 - [x] Mobile blast radius confirmed: none
+
+## Live fix verified (June 21 2026)
+
+Deployed by migrating drift-backend from a hand-run container to a
+properly compose-managed one. The running container had been serving a
+stale compiled dist/ build that predated the fix entirely, and a
+docker-compose.yml correction was also needed: REDIS_URL pointed at a
+Tailscale IP that did not match what was actually working in production.
+
+Re-ran the live test against the same trip used in the original empirical
+confirmation:
+
+BEFORE: safety_status=overdue, next_checkin_due stale (2026-06-20)
+CHECKIN: 201 Created, full response with checkinId/nextDueAt/status=active
+AFTER: safety_status=active, next_checkin_due advanced ~24h forward,
+last_checkin_at set
+trip_checkins: row persisted with lat/lng/battery_pct/note all correctly
+saved
+
+All three findings confirmed resolved:
+- Finding #1 (authorization gap): query scoped to user_id + active/overdue
+  status, confirmed via code review and diff
+- Finding #2 (unused capability): lat/lng/battery_pct/note now actually
+  persisted
+- Finding #3 (broken state machine): overdue clears to active,
+  next_checkin_due advances correctly
+
+Shipped as two commits: e8e6d80 (route fix) and 60c7249 (docker-compose.yml
+REDIS_URL correction plus backend migration to compose-managed deployment).
+
+- [x] Fix verified live against the real deployed container
+- [x] Backend migrated to compose-managed deployment
+- [x] docker-compose.yml REDIS_URL corrected
+- [x] Shipped to GitHub (commits e8e6d80, 60c7249)
