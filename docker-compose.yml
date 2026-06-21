@@ -32,7 +32,7 @@ services:
       NODE_ENV: development
       PORT: 5000
       DATABASE_URL: postgresql://traveller:traveller@postgres:5432/traveller_dev
-      REDIS_URL: redis://100.67.86.49:6379
+      REDIS_URL: redis://traveller-redis:6379
       JWT_SECRET: dev-jwt-secret-change-in-production
       JWT_REFRESH_SECRET: dev-refresh-secret-change-in-production
       UPLOAD_DIR: /app/uploads
