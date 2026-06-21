@@ -373,18 +373,53 @@ safetyRouter.post('/trips/:id/start', authenticate, async (req: AuthenticatedReq
 safetyRouter.post('/trips/checkin', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const body = checkinSchema.parse(req.body);
+
+    // Ownership + status check - only the trip's own owner can check in,
+    // and only while the trip is active or overdue (not planned/completed)
     const trip = await pool.query(
-      `SELECT next_checkin_due FROM member_trips WHERE id = $1`,
+      `SELECT id, checkin_interval_hours FROM member_trips
+       WHERE id = $1 AND user_id = $2 AND safety_status IN ('active', 'overdue')`,
+      [body.tripId, req.user!.id]
+    );
+    if (!trip.rows.length) return res.status(404).json({ message: 'Active trip not found' });
+
+    // Resolve traveler_id from the authenticated user, persist using the
+    // columns that actually exist on trip_checkins
+    const checkin = await pool.query(
+      `INSERT INTO trip_checkins (trip_id, traveler_id, lat, lng, battery_pct, note, ip_address)
+       SELECT $1, t.id, $2, $3, $4, $5, $6
+       FROM travelers t WHERE t.user_id = $7
+       RETURNING id, created_at`,
+      [
+        body.tripId,
+        body.latitude ?? null,
+        body.longitude ?? null,
+        body.batteryPct ?? null,
+        body.note ?? null,
+        req.ip ?? null,
+        req.user!.id,
+      ]
+    );
+    if (!checkin.rows.length) return res.status(500).json({ message: 'Could not record check-in' });
+
+    // Clear overdue status and advance the next check-in deadline
+    const updated = await pool.query(
+      `UPDATE member_trips SET
+        safety_status    = 'active',
+        last_checkin_at  = NOW(),
+        next_checkin_due = NOW() + (checkin_interval_hours * INTERVAL '1 hour')
+       WHERE id = $1
+       RETURNING next_checkin_due`,
       [body.tripId]
     );
-    if (!trip.rows.length) return res.status(404).json({ message: 'Trip not found' });
-    const result = await pool.query(
-      `INSERT INTO trip_checkins (trip_id, scheduled_return, checked_in_at, escalation_level)
-       VALUES ($1, $2, NOW(), 0)
-       RETURNING id, checked_in_at`,
-      [body.tripId, trip.rows[0].next_checkin_due]
-    );
-    return res.status(201).json(result.rows[0]);
+
+    return res.status(201).json({
+      checkinId: checkin.rows[0].id,
+      tripId: body.tripId,
+      checkedInAt: checkin.rows[0].created_at,
+      nextDueAt: updated.rows[0].next_checkin_due,
+      status: 'active',
+    });
   } catch (err) {
     if (err instanceof z.ZodError) return res.status(400).json({ message: 'Validation error', errors: err.errors });
     console.error(err);
