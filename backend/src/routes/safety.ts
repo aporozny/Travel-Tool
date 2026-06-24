@@ -38,20 +38,13 @@ safetyRouter.post('/location', authenticate, async (req: AuthenticatedRequest, r
     const recordedAt = body.timestamp
       ? new Date(body.timestamp * 1000).toISOString()
       : new Date().toISOString();
-    const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
 
     const result = await pool.query(
-      `INSERT INTO location_history
-         (id, traveler_id, location, accuracy, recorded_at, expires_at)
-       SELECT gen_random_uuid(), t.id, ST_MakePoint($1, $2)::geography, $3, $4, $5
-       FROM travelers t WHERE t.user_id = $6
-       RETURNING id, recorded_at`,
-      [body.longitude, body.latitude, body.accuracy ?? null, recordedAt, expiresAt, req.user!.id]
+      `INSERT INTO location_history (id, user_id, lat, lng, accuracy_m, created_at)
+       VALUES (gen_random_uuid(), $1, $2, $3, $4, $5)
+       RETURNING id, created_at AS recorded_at`,
+      [req.user!.id, body.latitude, body.longitude, body.accuracy ?? null, recordedAt]
     );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ message: 'Traveler profile not found' });
-    }
 
     await redis.setex(
       `location:${req.user!.id}`,
@@ -71,17 +64,15 @@ safetyRouter.get('/location/history', authenticate, async (req: AuthenticatedReq
   try {
     const { from, to, limit = '50' } = req.query;
     let query = `
-      SELECT lh.id, ST_X(lh.location::geometry) AS longitude, ST_Y(lh.location::geometry) AS latitude,
-             lh.accuracy, lh.recorded_at
-      FROM location_history lh
-      JOIN travelers t ON t.id = lh.traveler_id
-      WHERE t.user_id = $1 AND lh.expires_at > NOW()
+      SELECT id, lng AS longitude, lat AS latitude, accuracy_m AS accuracy, created_at AS recorded_at
+      FROM location_history
+      WHERE user_id = $1
     `;
     const params: any[] = [req.user!.id];
     let pc = 2;
-    if (from) { query += ` AND lh.recorded_at >= $${pc}`; params.push(from); pc++; }
-    if (to) { query += ` AND lh.recorded_at <= $${pc}`; params.push(to); pc++; }
-    query += ` ORDER BY lh.recorded_at DESC LIMIT $${pc}`;
+    if (from) { query += ` AND created_at >= $${pc}`; params.push(from); pc++; }
+    if (to) { query += ` AND created_at <= $${pc}`; params.push(to); pc++; }
+    query += ` ORDER BY created_at DESC LIMIT $${pc}`;
     params.push(Math.min(parseInt(limit as string), 200));
 
     const result = await pool.query(query, params);
@@ -153,10 +144,9 @@ safetyRouter.post('/sos', authenticate, async (req: AuthenticatedRequest, res: R
     if (cachedLocation) locationData = JSON.parse(cachedLocation);
 
     const contactsResult = await pool.query(
-      `SELECT sc.name, sc.email, sc.phone
-       FROM safety_contacts sc
-       JOIN travelers t ON t.id = sc.traveler_id
-       WHERE t.user_id = $1 AND sc.receives_sos = true`,
+      `SELECT id, name, email, phone
+       FROM safety_contacts
+       WHERE user_id = $1 AND receives_sos = true`,
       [req.user!.id]
     );
     const contacts = contactsResult.rows;
@@ -172,13 +162,17 @@ safetyRouter.post('/sos', authenticate, async (req: AuthenticatedRequest, res: R
     const travelerName = [traveler?.first_name, traveler?.last_name].filter(Boolean).join(' ') || traveler?.email;
 
     const sosResult = await pool.query(
-      `INSERT INTO sos_events (id, traveler_id, ${locationData ? 'location,' : ''} message, contacts_notified)
-       SELECT gen_random_uuid(), t.id, ${locationData ? `ST_MakePoint($1, $2)::geography,` : ''} $${locationData ? 3 : 1}, $${locationData ? 4 : 2}
-       FROM travelers t WHERE t.user_id = $${locationData ? 5 : 3}
+      `INSERT INTO sos_events (id, user_id, trigger_type, last_known_lat, last_known_lng, last_location_at, member_message, contacts_notified)
+       VALUES (gen_random_uuid(), $1, 'button', $2, $3, $4, $5, $6)
        RETURNING id, created_at`,
-      locationData
-        ? [locationData.longitude, locationData.latitude, body.message ?? null, contacts.length, req.user!.id]
-        : [body.message ?? null, contacts.length, req.user!.id]
+      [
+        req.user!.id,
+        locationData?.latitude ?? null,
+        locationData?.longitude ?? null,
+        locationData ? new Date().toISOString() : null,
+        body.message ?? null,
+        contacts.length,
+      ]
     );
 
     // Send notifications
@@ -452,9 +446,7 @@ safetyRouter.post('/sos/:id/ping', authenticate, async (req: AuthenticatedReques
 
     // Verify ownership
     const sos = await pool.query(
-      `SELECT se.id FROM sos_events se
-       JOIN travelers t ON t.id = se.traveler_id
-       WHERE se.id = $1 AND t.user_id = $2`,
+      `SELECT id FROM sos_events WHERE id = $1 AND user_id = $2`,
       [req.params.id, req.user!.id]
     );
     if (!sos.rows.length) return res.status(404).json({ message: 'SOS not found' });
@@ -490,10 +482,9 @@ safetyRouter.post('/sos/:id/resolve', authenticate, async (req: AuthenticatedReq
     const timeCol = isFalseAlarm ? 'false_alarm_at' : 'resolved_at';
 
     await pool.query(
-      `UPDATE sos_events se SET resolved_at = CASE WHEN $1 THEN resolved_at ELSE NOW() END,
+      `UPDATE sos_events SET resolved_at = CASE WHEN $1 THEN resolved_at ELSE NOW() END,
         false_alarm_at = CASE WHEN $1 THEN NOW() ELSE false_alarm_at END
-       FROM travelers t
-       WHERE se.id = $2 AND se.traveler_id = t.id AND t.user_id = $3`,
+       WHERE id = $2 AND user_id = $3`,
       [isFalseAlarm, req.params.id, req.user!.id]
     );
 
