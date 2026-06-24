@@ -21,7 +21,8 @@ const contactSchema = z.object({
   relationship: z.string().max(50).optional(),
   can_see_location: z.boolean().default(true),
   receives_sos: z.boolean().default(true),
-  access_expires_at: z.string().datetime().optional(),
+  notify_on_overdue: z.boolean().default(true),
+  notify_on_sos: z.boolean().default(true),
 });
 
 const sosSchema = z.object({
@@ -98,12 +99,11 @@ safetyRouter.post('/contacts', authenticate, async (req: AuthenticatedRequest, r
     if (!body.email && !body.phone) return res.status(400).json({ message: 'Contact must have an email or phone number' });
 
     const result = await pool.query(
-      `INSERT INTO safety_contacts (id, traveler_id, name, email, phone, relationship, can_see_location, receives_sos, access_expires_at)
-       SELECT gen_random_uuid(), t.id, $1, $2, $3, $4, $5, $6, $7
-       FROM travelers t WHERE t.user_id = $8
-       RETURNING id, name, email, phone, relationship, can_see_location, receives_sos, access_expires_at, created_at`,
-      [body.name, body.email ?? null, body.phone ?? null, body.relationship ?? null,
-       body.can_see_location, body.receives_sos, body.access_expires_at ?? null, req.user!.id]
+      `INSERT INTO safety_contacts (id, user_id, name, email, phone, relationship, can_see_location, receives_sos, notify_on_overdue, notify_on_sos)
+       VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9)
+       RETURNING id, name, email, phone, relationship, can_see_location, receives_sos, notify_on_overdue, notify_on_sos, created_at`,
+      [req.user!.id, body.name, body.email ?? null, body.phone ?? null, body.relationship ?? null,
+       body.can_see_location, body.receives_sos, body.notify_on_overdue, body.notify_on_sos]
     );
     return res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -116,11 +116,10 @@ safetyRouter.post('/contacts', authenticate, async (req: AuthenticatedRequest, r
 safetyRouter.get('/contacts', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const result = await pool.query(
-      `SELECT sc.id, sc.name, sc.email, sc.phone, sc.relationship,
-              sc.can_see_location, sc.receives_sos, sc.access_expires_at, sc.created_at
-       FROM safety_contacts sc
-       JOIN travelers t ON t.id = sc.traveler_id
-       WHERE t.user_id = $1 ORDER BY sc.created_at ASC`,
+      `SELECT id, name, email, phone, relationship,
+              can_see_location, receives_sos, notify_on_overdue, notify_on_sos, created_at
+       FROM safety_contacts
+       WHERE user_id = $1 ORDER BY created_at ASC`,
       [req.user!.id]
     );
     return res.json(result.rows);
@@ -133,8 +132,7 @@ safetyRouter.get('/contacts', authenticate, async (req: AuthenticatedRequest, re
 safetyRouter.delete('/contacts/:id', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const result = await pool.query(
-      `DELETE FROM safety_contacts sc USING travelers t
-       WHERE sc.id = $1 AND sc.traveler_id = t.id AND t.user_id = $2 RETURNING sc.id`,
+      `DELETE FROM safety_contacts WHERE id = $1 AND user_id = $2 RETURNING id`,
       [req.params.id, req.user!.id]
     );
     if (result.rows.length === 0) return res.status(404).json({ message: 'Contact not found' });
