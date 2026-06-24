@@ -11,6 +11,7 @@ export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
+  const [destination, setDestination] = useState('');
   const [role, setRole] = useState<'traveler' | 'operator'>('traveler');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -81,7 +82,7 @@ export default function LoginScreen() {
     setLoading(true);
     setError('');
     try {
-      await api.post('/waitlist', { email, name: name || undefined, source: 'direct' });
+      await api.post('/waitlist', { email, name: name || undefined, destination: destination || undefined, source: 'direct' });
       setWaitlistSuccess(true);
     } catch (err: any) {
       setError(err?.response?.data?.message || 'Something went wrong. Please try again.');
@@ -135,6 +136,14 @@ export default function LoginScreen() {
                   onChange={e => setEmail(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && handleWaitlist()}
                   placeholder="you@example.com" />
+              </div>
+
+              <div style={s.field}>
+                <label style={s.label}>Where do you want to travel?</label>
+                <input style={s.input} type="text" value={destination}
+                  onChange={e => setDestination(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleWaitlist()}
+                  placeholder="Bali, Albania, anywhere..." />
               </div>
 
               <button style={{ ...s.submit, opacity: loading ? 0.7 : 1 }}

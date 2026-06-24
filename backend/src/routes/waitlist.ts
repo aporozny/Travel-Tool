@@ -13,6 +13,7 @@ export const adminRouter = Router();
 const joinSchema = z.object({
   email: z.string().email(),
   name: z.string().max(100).optional(),
+  destination: z.string().max(100).optional(),
   source: z.enum(['twitter', 'instagram', 'facebook', 'direct', 'referral']).optional(),
   note: z.string().max(500).optional(),
 });
@@ -46,11 +47,12 @@ waitlistRouter.post('/', async (req: Request, res: Response) => {
     }
 
     await pool.query(
-      `INSERT INTO waitlist (email, name, source, note)
-       VALUES ($1, $2, $3, $4)`,
+      `INSERT INTO waitlist (email, name, destination, source, note)
+       VALUES ($1, $2, $3, $4, $5)`,
       [
         body.email.toLowerCase(),
         body.name || null,
+        body.destination || null,
         body.source || 'direct',
         body.note || null,
       ]
@@ -149,7 +151,7 @@ adminRouter.get('/', authenticate, adminAuth as any, async (req: AuthenticatedRe
   try {
     const { status } = req.query;
     let query = `
-      SELECT id, email, name, source, note, status,
+      SELECT id, email, name, destination, source, note, status,
              invite_token, invite_expires_at, invite_used_at,
              approved_at, created_at
       FROM waitlist
