@@ -178,6 +178,7 @@ safetyRouter.post('/sos', authenticate, async (req: AuthenticatedRequest, res: R
     // Send notifications
     if (contacts.length > 0) {
       sendSOSAlert({
+        sosId: sosResult.rows[0].id,
         travelerName,
         travelerEmail: traveler?.email,
         latitude: locationData?.latitude ?? null,
