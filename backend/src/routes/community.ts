@@ -76,7 +76,7 @@ communityRouter.get('/feed', authenticate, async (req: AuthenticatedRequest, res
        LEFT JOIN places_cache pc ON pc.id = cp.place_id
        LEFT JOIN post_media pm ON pm.post_id = cp.id
        LEFT JOIN post_reactions pr ON pr.post_id = cp.id AND pr.user_id = $1
-       LEFT JOIN member_saves ms ON ms.user_id = $1 AND ms.entity_type = 'post' AND ms.entity_id = cp.id::text
+       LEFT JOIN member_saves ms ON ms.user_id = $1 AND ms.entity_type = 'post' AND ms.entity_id = cp.id
        WHERE cp.is_deleted = FALSE
          AND cp.visibility = 'public'
          AND (
