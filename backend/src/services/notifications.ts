@@ -1,10 +1,13 @@
 // Notification service
-// Sends real email via SendGrid and real SMS via Twilio.
-// Requires SENDGRID_API_KEY, SENDGRID_FROM_EMAIL, TWILIO_ACCOUNT_SID,
-// TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER as environment variables.
+// Sends real email via SendGrid and real SMS via Mobile Message (Australian
+// SMS gateway - Twilio's AU numbers turned out to be voice-only, see
+// docs/SAFETY_SOS_SYSTEM_FIX.md).
+// Requires SENDGRID_API_KEY, SENDGRID_FROM_EMAIL, MOBILEMESSAGE_API_USERNAME,
+// MOBILEMESSAGE_API_PASSWORD, MOBILEMESSAGE_SENDER as environment variables.
 // If any are missing, the corresponding channel is skipped (logged, not sent)
 // rather than throwing - so this degrades gracefully in dev/test environments.
 import { pool } from '../utils/db';
+import axios from 'axios';
 
 interface SOSNotification {
   sosId: string;
@@ -49,20 +52,31 @@ async function sendEmail(to: string, subject: string, text: string): Promise<boo
 }
 
 async function sendSms(to: string, body: string): Promise<boolean> {
-  if (!process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_AUTH_TOKEN || !process.env.TWILIO_PHONE_NUMBER) {
-    console.log('Twilio credentials not set - skipping SMS to', to);
+  if (!process.env.MOBILEMESSAGE_API_USERNAME || !process.env.MOBILEMESSAGE_API_PASSWORD || !process.env.MOBILEMESSAGE_SENDER) {
+    console.log('Mobile Message credentials not set - skipping SMS to', to);
     return false;
   }
   try {
-    const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-    await twilioClient.messages.create({
-      body,
-      from: process.env.TWILIO_PHONE_NUMBER,
-      to,
-    });
-    return true;
+    const response = await axios.post(
+      'https://api.mobilemessage.com.au/v1/messages',
+      {
+        messages: [{ to, message: body, sender: process.env.MOBILEMESSAGE_SENDER }],
+      },
+      {
+        auth: {
+          username: process.env.MOBILEMESSAGE_API_USERNAME,
+          password: process.env.MOBILEMESSAGE_API_PASSWORD,
+        },
+      }
+    );
+    const result = response.data?.results?.[0];
+    if (result?.status === 'success') {
+      return true;
+    }
+    console.error('Mobile Message send failed for', to, JSON.stringify(response.data));
+    return false;
   } catch (err) {
-    console.error('Twilio send failed for', to, err);
+    console.error('Mobile Message send failed for', to, err);
     return false;
   }
 }
