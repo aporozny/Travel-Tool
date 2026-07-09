@@ -30,7 +30,7 @@ interface BookingNotification {
   guests: number;
 }
 
-async function sendEmail(to: string, subject: string, text: string): Promise<boolean> {
+export async function sendEmail(to: string, subject: string, text: string): Promise<boolean> {
   if (!process.env.SENDGRID_API_KEY) {
     console.log('SENDGRID_API_KEY not set - skipping email to', to);
     return false;

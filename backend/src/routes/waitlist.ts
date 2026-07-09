@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { pool } from '../utils/db';
 import { authenticate, AuthenticatedRequest } from '../middleware/authenticate';
 import { z } from 'zod';
+import { sendEmail } from '../services/notifications';
 
 export const waitlistRouter = Router();
 export const adminRouter = Router();
@@ -213,7 +214,14 @@ adminRouter.post('/:id/approve', authenticate, adminAuth as any, async (req: Aut
       [token, expires, id]
     );
 
-    const inviteUrl = `${process.env.APP_URL || 'http://100.67.86.49'}/invite/${token}`;
+    const inviteUrl = `${process.env.APP_URL || 'https://drifttravel.app'}/invite/${token}`;
+
+    // Send the invite email (failure must not break the approve response)
+    await sendEmail(
+      entry.email,
+      'Your Drift invitation is ready',
+      `You've been approved to join Drift.\n\nAccept your invitation and create your account:\n${inviteUrl}\n\nThis link expires in 7 days.\n\nSee you inside,\nThe Drift team`
+    ).catch((e) => console.error('Invite email failed for', entry.email, e));
 
     return res.json({
       message: 'Approved',
