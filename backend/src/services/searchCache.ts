@@ -169,14 +169,17 @@ async function getCatalogResults(
 	}
 
 	if (query && query.trim()) {
-		const q = `%${query.trim()}%`;
+		const raw = query.trim();
+		const q = `%${raw}%`;
+		// Singular fallback so "restaurants" matches tag/name "restaurant"
+		const qs = `%${raw.replace(/s$/i, "")}%`;
 		conditions.push(`(
-      pc.name ILIKE $${n}
-      OR pc.description ILIKE $${n}
-      OR EXISTS (SELECT 1 FROM unnest(pc.tags) tg WHERE tg ILIKE $${n})
+      pc.name ILIKE $${n} OR pc.name ILIKE $${n + 1}
+      OR pc.description ILIKE $${n} OR pc.description ILIKE $${n + 1}
+      OR EXISTS (SELECT 1 FROM unnest(pc.tags) tg WHERE tg ILIKE $${n} OR tg ILIKE $${n + 1})
     )`);
-		params.push(q);
-		n++;
+		params.push(q, qs);
+		n += 2;
 	}
 
 	params.push(limit);
