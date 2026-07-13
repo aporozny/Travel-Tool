@@ -3,7 +3,7 @@
 | ID | Risk | Likelihood | Impact | Response | Owner | Status |
 |---|---|---|---|---|---|---|
 | R1 | Google Geocoding API not enabled on existing key → geocoding fails | M | M | Code falls back to legacy region-string search; enable API in Google Cloud console if hit | Andre | Open |
-| R2 | Google Places cost blowout once app is worldwide (every new city = fresh fetches) | M | H | Coverage threshold limits fetches; 30-day cache; monitor billing; $200/mo free credit ceiling alert in Google console | Andre | Open |
+| R2 | Google Places cost blowout once app is worldwide (every new city = fresh fetches) | M | H | Coverage threshold + 30-day cache + daily fetch budget (FETCH_DAILY_BUDGET, default 200/day, WP4.2). Billing alert in Google console still recommended | Andre | **Mitigated 2026-07-13** |
 | R3 | Changing `score_breakdown` semantics breaks web/mobile UI display | L | M | Keys kept identical; only values reinterpreted; UAT on production after deploy | Claude | Mitigated |
 | R4 | Deploy restarts production backend; brief outage for live users | H | L | Deploy in low-traffic window; health check + rollback via git revert + rebuild | Claude | Accepted |
 | R5 | places_cache uniqueness is (external_id, source) — multi-source future will create duplicates across sources | H | M | Serve-time fuzzy dedup implemented (dedup.ts: name+150m geo, source-ranked merge) | Claude | **Mitigated 2026-07-13** |

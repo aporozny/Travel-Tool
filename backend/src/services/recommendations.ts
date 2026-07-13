@@ -446,6 +446,40 @@ function totalScore(
 	return Object.values(breakdown).reduce((sum, v) => sum + v, 0);
 }
 
+// Diversity assembly: when serving mixed results, round-robin across
+// categories (best-first within each) so twenty restaurants cannot crowd
+// out every stay and activity. Preserves pure score order per category.
+export function interleaveByCategory(
+	items: RecommendationResult[],
+	limit: number,
+): RecommendationResult[] {
+	const byCategory = new Map<string, RecommendationResult[]>();
+	for (const item of items) {
+		const cat = item.category || "other";
+		if (!byCategory.has(cat)) byCategory.set(cat, []);
+		byCategory.get(cat)!.push(item);
+	}
+	// Best-first within each category, then strongest lead item first
+	for (const q of byCategory.values()) {
+		q.sort((a, b) => b.score - a.score);
+	}
+	const queues = [...byCategory.values()].sort(
+		(a, b) => (b[0]?.score || 0) - (a[0]?.score || 0),
+	);
+	const out: RecommendationResult[] = [];
+	let added = true;
+	while (out.length < limit && added) {
+		added = false;
+		for (const q of queues) {
+			if (q.length > 0 && out.length < limit) {
+				out.push(q.shift()!);
+				added = true;
+			}
+		}
+	}
+	return out;
+}
+
 // Fetch member preferences from DB
 async function getMemberPreferences(
 	userId: string,
@@ -623,7 +657,11 @@ export async function getRecommendations(
 		})
 		.sort((a, b) => b.score - a.score);
 
-	const results = scored.slice(0, limit);
+	// Category-filtered requests keep pure score order; mixed requests get
+	// category diversity (WP4.1).
+	const results = category
+		? scored.slice(0, limit)
+		: interleaveByCategory(scored, limit);
 
 	// Cache results for 1 hour for authenticated users
 	if (userId) {

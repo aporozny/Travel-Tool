@@ -369,3 +369,35 @@ describe("matchDestination", () => {
     expect(matchDestination(dests as any, "Atlantis")).toBeNull();
   });
 });
+
+// --- Stage 4: diversity assembly ---
+import { interleaveByCategory } from "../src/services/recommendations";
+
+describe("interleaveByCategory", () => {
+  const mk = (name: string, category: string, score: number): any =>
+    ({ name, category, score });
+
+  it("prevents one category flooding mixed results", () => {
+    const items = [
+      ...Array.from({ length: 10 }, (_, i) => mk(`food${i}`, "food", 90 - i)),
+      mk("hotel1", "accommodation", 70),
+      mk("tour1", "activity", 60),
+    ];
+    const out = interleaveByCategory(items as any, 6);
+    const cats = new Set(out.map((r: any) => r.category));
+    expect(cats.size).toBe(3); // all categories represented in top 6
+  });
+
+  it("keeps best-first order within each category", () => {
+    const items = [mk("a", "food", 50), mk("b", "food", 90), mk("c", "food", 70)];
+    const out = interleaveByCategory(items as any, 3);
+    expect(out.map((r: any) => r.name)).toEqual(["b", "c", "a"]);
+  });
+
+  it("respects the limit and handles fewer items than limit", () => {
+    const items = [mk("a", "food", 50)];
+    expect(interleaveByCategory(items as any, 5)).toHaveLength(1);
+    const many = Array.from({ length: 30 }, (_, i) => mk(`x${i}`, "food", i));
+    expect(interleaveByCategory(many as any, 10)).toHaveLength(10);
+  });
+});

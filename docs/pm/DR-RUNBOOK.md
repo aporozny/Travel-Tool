@@ -18,7 +18,7 @@ Uploads volume: /var/www/drift/uploads  →  /app/uploads in backend
 ## 2. Secrets & config locations (values NOT stored here)
 | Item | Where it lives |
 |---|---|
-| Backend env (JWT_SECRET, JWT_REFRESH_SECRET, GOOGLE_PLACES_API_KEY, SENDGRID_*, MOBILEMESSAGE_*, DATABASE_URL, REDIS_URL, APP_URL, FRONTEND_URL, UPLOAD_DIR) | `backend/.env` on host (gitignored) + `docker-compose.yml` environment block |
+| Backend env (JWT_SECRET, JWT_REFRESH_SECRET, GOOGLE_PLACES_API_KEY, VIATOR_API_KEY, FOURSQUARE_API_KEY, FETCH_DAILY_BUDGET, SENDGRID_*, MOBILEMESSAGE_*, DATABASE_URL, REDIS_URL, APP_URL, FRONTEND_URL, UPLOAD_DIR) | `backend/.env` on host (gitignored) + `docker-compose.yml` environment block. VIATOR/FOURSQUARE keys are optional — discovery degrades to Google-only without them. |
 | Cloudflare tunnel credentials | `/root/.cloudflared/b754118f-….json`; config `/etc/cloudflared/config.yml` |
 | nginx site | `/etc/nginx/sites-enabled/drift` |
 | Google Cloud console (key regen) | Google account of project owner |

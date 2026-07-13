@@ -10,5 +10,5 @@
 | I6 | 2026-07-08 | Concern | `member_interactions` tracked but unused in ranking | Medium | **Closed 2026-07-13** | WP2.2 |
 | I7 | 2026-07-08 | Concern | Legacy Places API; v1 gives details in one call | Medium | **Closed 2026-07-13** | WP2.3 |
 | I8 | 2026-07-08 | Concern | Single data source (Google); no tours inventory / no revenue hook | Medium | **Code complete 2026-07-13** | WP3.1-3.4; live once VIATOR_API_KEY added |
-| I9 | 2026-07-10 | Concern | Pre-existing test failures in auth/operators suites (15/15 fail at HEAD; unrelated to Stage 1) | Medium | Open | Needs DB fixtures work |
+| I9 | 2026-07-10 | Concern | Pre-existing test failures in auth/operators suites (15/15 fail at HEAD; unrelated to Stage 1) | Medium | **Closed 2026-07-13** | tests/setup-env.ts (WP4.3) |
 | I10 | 2026-07-10 | Concern | Root-owned files recur across repo (.env, dist/) — blocked builds twice this stage | Medium | Open | chown applied; watch for recurrence |

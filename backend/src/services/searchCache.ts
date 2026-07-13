@@ -1,9 +1,36 @@
 import { pool } from "../utils/db";
+import { redis } from "../utils/redis";
 import { searchPlaces, getPlaceDetails, PlaceResult } from "./googlePlaces";
 import { geocodeDestination, GeoResult } from "./geocoding";
 import { searchViatorProducts, viatorEnabled } from "./viator";
 import { searchFoursquare, foursquareEnabled } from "./foursquare";
 import { dedupPlaces } from "./dedup";
+
+// Daily cap on live external fan-outs (R2: cost control). Over budget the
+// app serves catalog-only until midnight UTC. Override per environment.
+const FETCH_DAILY_BUDGET = parseInt(
+	process.env.FETCH_DAILY_BUDGET || "200",
+	10,
+);
+
+// Returns true when this fan-out is within today's budget. Fails open on
+// Redis errors — a broken counter must not disable discovery.
+async function withinFetchBudget(): Promise<boolean> {
+	try {
+		const key = `fetch-budget:${new Date().toISOString().slice(0, 10)}`;
+		const used = await redis.incr(key);
+		if (used === 1) await redis.expire(key, 26 * 3600);
+		if (used > FETCH_DAILY_BUDGET) {
+			console.warn(
+				`Fetch budget exhausted (${used}/${FETCH_DAILY_BUDGET}) — catalog-only until midnight UTC`,
+			);
+			return false;
+		}
+		return true;
+	} catch {
+		return true;
+	}
+}
 
 const CACHE_TTL_DAYS = 30;
 
@@ -229,7 +256,7 @@ export async function search(
 	let fetchedLive = false;
 	try {
 		const coverage = await coverageCount(geo, category);
-		if (coverage < MIN_COVERAGE) {
+		if (coverage < MIN_COVERAGE && (await withinFetchBudget())) {
 			const wantTours = !category || category === "activity";
 			const [google, viator, foursquare] = await Promise.allSettled([
 				searchPlaces(query, region, geo.point ?? null),
