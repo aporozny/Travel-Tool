@@ -102,7 +102,10 @@ export interface RecommendationResult {
 		accommodation: number;
 		rating_boost: number;
 		claimed_bonus: number;
+		social: number;
 	};
+	// Community interest for UI ("N travellers saved this recently")
+	community: { saves: number; books: number };
 	website: string | null;
 	phone: string | null;
 }
@@ -154,16 +157,69 @@ export function bayesianRating(
 // Verified/claimed businesses get a visibility nudge, never dominance.
 export const MAX_TIER_BONUS = 8;
 
-// Score weights (sum = 100):
-//   personal fit 30 | budget 15 | region 15 | quality 25 | popularity 7 | tier 8
-// Breakdown keys are kept identical to the previous version for frontend
-// compatibility: `activity`/`dietary`/`accommodation` hold the personal-fit
-// contribution for the item's own category; `rating_boost` holds
-// quality+popularity.
+// --- Stage 2: community + behaviour signals ---
+
+// Interaction weights for both social proof and personal affinities.
+export const INTERACTION_WEIGHTS: Record<string, number> = {
+	book: 5,
+	review: 4,
+	save: 3,
+	share: 2,
+	view: 1,
+};
+
+export const MAX_SOCIAL_SCORE = 15;
+// Users need this many interactions before behaviour outweighs onboarding.
+export const AFFINITY_MIN_INTERACTIONS = 5;
+
+export interface SocialSignal {
+	weighted: number; // weighted sum of member interactions, 90-day window
+	saves: number;
+	books: number;
+}
+
+export interface UserAffinities {
+	totalInteractions: number;
+	tags: Record<string, number>; // tag -> normalized weight 0..1
+}
+
+// Community interest, log-scaled: 1 interaction ≈ 2pts, 10 ≈ 8, 100+ ≈ 15.
+export function socialScore(signal?: SocialSignal): number {
+	if (!signal || signal.weighted <= 0) return 0;
+	return Math.min(
+		MAX_SOCIAL_SCORE,
+		Math.round(Math.log10(1 + signal.weighted) * 7.5),
+	);
+}
+
+// Fraction 0..1 of how strongly the item's tags match learned affinities.
+export function affinityMatch(
+	opTags: string[],
+	affinities?: UserAffinities,
+): number {
+	if (!affinities || affinities.totalInteractions < AFFINITY_MIN_INTERACTIONS)
+		return 0;
+	let sum = 0;
+	for (const t of opTags) {
+		sum += affinities.tags[t] || 0;
+	}
+	return Math.min(1, sum);
+}
+
+// Score weights (sum = 100 + social 15, normalised by sort not scale):
+//   personal fit 30 | budget 15 | region 15 | quality 25 | popularity 7
+//   | tier 8 | social 15 (new key — additive, no renames)
+// Personal fit for activity categories blends onboarding preferences with
+// learned behaviour 40/60 once the user has enough history (Executive
+// decision 2026-07-13: behaviour may outweigh stated preferences). Food and
+// accommodation keep hard preference logic (dietary requirements are not
+// diluted by behaviour) with a small affinity bonus inside the 30 cap.
 export function scoreOperator(
 	op: any,
 	prefs: MemberPreferences,
 	targetRegion?: string,
+	social?: SocialSignal,
+	affinities?: UserAffinities,
 ): RecommendationResult["score_breakdown"] {
 	const breakdown = {
 		activity: 0,
@@ -173,6 +229,7 @@ export function scoreOperator(
 		accommodation: 0,
 		rating_boost: 0,
 		claimed_bonus: 0,
+		social: 0,
 	};
 
 	const opTags: string[] = op.tags || [];
@@ -198,6 +255,8 @@ export function scoreOperator(
 		if (mustHaves.length > 0) {
 			fit += Math.round((mustHits / mustHaves.length) * 10);
 		}
+		// Behaviour bonus inside the cap (e.g. user keeps saving villas)
+		fit += Math.round(affinityMatch(opTags, affinities) * 6);
 		breakdown.accommodation = Math.min(fit, 30);
 	} else if (category === "food") {
 		const dietary = (prefs.dietary_requirements || []).filter(
@@ -227,8 +286,14 @@ export function scoreOperator(
 				break;
 			}
 		}
+		// Behaviour bonus inside the cap; dietary requirements stay undiluted
+		breakdown.dietary = Math.min(
+			breakdown.dietary + Math.round(affinityMatch(opTags, affinities) * 6),
+			30,
+		);
 	} else {
-		// activities, tours, transport, everything else: activity-tag match
+		// activities, tours, transport, everything else: activity-tag match,
+		// blended 40/60 with learned behaviour once history exists.
 		const allActivities = [
 			...(prefs.water_activities || []),
 			...(prefs.land_activities || []),
@@ -239,9 +304,14 @@ export function scoreOperator(
 			const mappedTags = ACTIVITY_TAG_MAP[activity] || [activity];
 			if (mappedTags.some((t) => opTags.includes(t))) matches++;
 		}
-		if (allActivities.length > 0) {
-			breakdown.activity = Math.round((matches / allActivities.length) * 30);
-		}
+		const prefFrac =
+			allActivities.length > 0 ? matches / allActivities.length : 0;
+		const behFrac = affinityMatch(opTags, affinities);
+		const blended =
+			affinities && affinities.totalInteractions >= AFFINITY_MIN_INTERACTIONS
+				? 0.4 * prefFrac + 0.6 * behFrac
+				: prefFrac;
+		breakdown.activity = Math.round(blended * 30);
 	}
 
 	// --- Budget score (0-15) ---
@@ -301,7 +371,73 @@ export function scoreOperator(
 		breakdown.claimed_bonus = 4;
 	}
 
+	// --- Community interest (0-15) ---
+	breakdown.social = socialScore(social);
+
 	return breakdown;
+}
+
+// One query: weighted 90-day interaction totals for a set of entities.
+export async function getSocialSignals(
+	entityIds: string[],
+): Promise<Map<string, SocialSignal>> {
+	const map = new Map<string, SocialSignal>();
+	if (entityIds.length === 0) return map;
+	const result = await pool.query(
+		`SELECT entity_id,
+		        SUM(CASE interaction_type
+		              WHEN 'book' THEN 5 WHEN 'review' THEN 4 WHEN 'save' THEN 3
+		              WHEN 'share' THEN 2 ELSE 1 END) AS weighted,
+		        COUNT(*) FILTER (WHERE interaction_type = 'save') AS saves,
+		        COUNT(*) FILTER (WHERE interaction_type = 'book') AS books
+		 FROM member_interactions
+		 WHERE entity_id = ANY($1)
+		   AND created_at > NOW() - INTERVAL '90 days'
+		 GROUP BY entity_id`,
+		[entityIds],
+	);
+	for (const row of result.rows) {
+		map.set(row.entity_id, {
+			weighted: parseInt(row.weighted, 10) || 0,
+			saves: parseInt(row.saves, 10) || 0,
+			books: parseInt(row.books, 10) || 0,
+		});
+	}
+	return map;
+}
+
+// Learned tag affinities from the user's own interaction history (90 days).
+// Weights normalised so the strongest tag = 1.
+export async function getUserAffinities(
+	userId: string,
+): Promise<UserAffinities> {
+	const result = await pool.query(
+		`SELECT tag,
+		        SUM(CASE interaction_type
+		              WHEN 'book' THEN 5 WHEN 'review' THEN 4 WHEN 'save' THEN 3
+		              WHEN 'share' THEN 2 ELSE 1 END) AS weight,
+		        (SELECT COUNT(*) FROM member_interactions
+		          WHERE user_id = $1
+		            AND created_at > NOW() - INTERVAL '90 days') AS total
+		 FROM member_interactions, unnest(tags) AS tag
+		 WHERE user_id = $1
+		   AND created_at > NOW() - INTERVAL '90 days'
+		 GROUP BY tag`,
+		[userId],
+	);
+	const tags: Record<string, number> = {};
+	let max = 0;
+	let total = 0;
+	for (const row of result.rows) {
+		const w = parseInt(row.weight, 10) || 0;
+		tags[row.tag] = w;
+		if (w > max) max = w;
+		total = parseInt(row.total, 10) || 0;
+	}
+	if (max > 0) {
+		for (const t of Object.keys(tags)) tags[t] = tags[t] / max;
+	}
+	return { totalInteractions: total, tags };
 }
 
 function totalScore(
@@ -408,118 +544,84 @@ export async function getRecommendations(
 
 	const allItems = [...opResult.rows, ...placeResult.rows];
 
-	// Get member preferences if authenticated
-	const prefs = userId ? await getMemberPreferences(userId) : null;
+	// Preferences, learned affinities, and community signals in parallel
+	const [prefs, affinities, socialMap] = await Promise.all([
+		userId ? getMemberPreferences(userId) : Promise.resolve(null),
+		userId
+			? getUserAffinities(userId)
+			: Promise.resolve(undefined as UserAffinities | undefined),
+		getSocialSignals(allItems.map((i) => i.id)),
+	]);
 
-	let scored: RecommendationResult[];
+	const emptyBreakdown = () => ({
+		activity: 0,
+		budget: 0,
+		region: 0,
+		dietary: 0,
+		accommodation: 0,
+		rating_boost: 0,
+		claimed_bonus: 0,
+		social: 0,
+	});
 
-	if (prefs && prefs.onboarding_completed) {
-		// Full personalized scoring
-		scored = allItems
-			.map((item) => {
-				const breakdown = scoreOperator(item, prefs, region);
-				const score = totalScore(breakdown);
-				return {
-					id: item.id,
-					type: item.type,
-					name: item.name,
-					category: item.category,
-					description: item.description,
-					region: item.region,
-					address: item.address,
-					latitude: item.latitude ? parseFloat(item.latitude) : null,
-					longitude: item.longitude ? parseFloat(item.longitude) : null,
-					rating: item.rating ? parseFloat(item.rating) : null,
-					review_count: parseInt(item.review_count) || 0,
-					price_level: item.price_level,
-					photos: Array.isArray(item.photos)
-						? item.photos
-						: item.photos
-							? JSON.parse(item.photos)
-							: [],
-					tags: item.tags || [],
-					is_claimed: item.is_claimed || false,
-					is_verified: item.is_verified || false,
-					score,
-					score_breakdown: breakdown,
-					website: item.website,
-					phone: item.phone,
-				};
-			})
-			.sort((a, b) => b.score - a.score);
-	} else if (prefs) {
-		// Partial preferences - use what we have, rest by rating
-		scored = allItems
-			.map((item) => {
-				const breakdown = scoreOperator(item, prefs, region);
-				const score = totalScore(breakdown);
-				return {
-					id: item.id,
-					type: item.type as "operator" | "place",
-					name: item.name,
-					category: item.category,
-					description: item.description,
-					region: item.region,
-					address: item.address,
-					latitude: item.latitude ? parseFloat(item.latitude) : null,
-					longitude: item.longitude ? parseFloat(item.longitude) : null,
-					rating: item.rating ? parseFloat(item.rating) : null,
-					review_count: parseInt(item.review_count) || 0,
-					price_level: item.price_level,
-					photos: Array.isArray(item.photos)
-						? item.photos
-						: item.photos
-							? JSON.parse(item.photos)
-							: [],
-					tags: item.tags || [],
-					is_claimed: item.is_claimed || false,
-					is_verified: item.is_verified || false,
-					score,
-					score_breakdown: breakdown,
-					website: item.website,
-					phone: item.phone,
-				};
-			})
-			.sort((a, b) => b.score - a.score);
-	} else {
-		// Anonymous - rank by claimed status then rating
-		scored = allItems
-			.map((item) => ({
-				id: item.id,
-				type: item.type as "operator" | "place",
-				name: item.name,
-				category: item.category,
-				description: item.description,
-				region: item.region,
-				address: item.address,
-				latitude: item.latitude ? parseFloat(item.latitude) : null,
-				longitude: item.longitude ? parseFloat(item.longitude) : null,
-				rating: item.rating ? parseFloat(item.rating) : null,
-				review_count: parseInt(item.review_count) || 0,
-				price_level: item.price_level,
-				photos: Array.isArray(item.photos)
-					? item.photos
-					: item.photos
-						? JSON.parse(item.photos)
-						: [],
-				tags: item.tags || [],
-				is_claimed: item.is_claimed || false,
-				is_verified: item.is_verified || false,
-				score: (item.is_claimed ? 10 : 0) + (parseFloat(item.rating) || 0) * 2,
-				score_breakdown: {
-					activity: 0,
-					budget: 0,
-					region: 0,
-					dietary: 0,
-					accommodation: 0,
-					rating_boost: 0,
-					claimed_bonus: 0,
-				},
-				website: item.website,
-				phone: item.phone,
-			}))
-			.sort((a, b) => b.score - a.score);
-	}
+	const toResult = (
+		item: any,
+		breakdown: RecommendationResult["score_breakdown"],
+		score: number,
+	): RecommendationResult => {
+		const signal = socialMap.get(item.id);
+		return {
+			id: item.id,
+			type: item.type as "operator" | "place",
+			name: item.name,
+			category: item.category,
+			description: item.description,
+			region: item.region,
+			address: item.address,
+			latitude: item.latitude ? parseFloat(item.latitude) : null,
+			longitude: item.longitude ? parseFloat(item.longitude) : null,
+			rating: item.rating ? parseFloat(item.rating) : null,
+			review_count: parseInt(item.review_count) || 0,
+			price_level: item.price_level,
+			photos: Array.isArray(item.photos)
+				? item.photos
+				: item.photos
+					? JSON.parse(item.photos)
+					: [],
+			tags: item.tags || [],
+			is_claimed: item.is_claimed || false,
+			is_verified: item.is_verified || false,
+			score,
+			score_breakdown: breakdown,
+			community: { saves: signal?.saves || 0, books: signal?.books || 0 },
+			website: item.website,
+			phone: item.phone,
+		};
+	};
+
+	const scored: RecommendationResult[] = allItems
+		.map((item) => {
+			if (prefs) {
+				// Personalized scoring (full or partial preferences)
+				const breakdown = scoreOperator(
+					item,
+					prefs,
+					region,
+					socialMap.get(item.id),
+					affinities,
+				);
+				return toResult(item, breakdown, totalScore(breakdown));
+			}
+			// Anonymous: claimed status, rating, and community interest
+			const breakdown = emptyBreakdown();
+			breakdown.social = socialScore(socialMap.get(item.id));
+			const score =
+				(item.is_claimed ? 10 : 0) +
+				(parseFloat(item.rating) || 0) * 2 +
+				breakdown.social;
+			return toResult(item, breakdown, score);
+		})
+		.sort((a, b) => b.score - a.score);
 
 	const results = scored.slice(0, limit);
 

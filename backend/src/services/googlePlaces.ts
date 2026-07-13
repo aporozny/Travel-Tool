@@ -59,6 +59,100 @@ export interface SearchGeo {
 	country: string;
 }
 
+// Places API v1 PriceLevel enum -> numeric 1-4
+export function mapPriceLevelV1(level?: string): number | null {
+	switch (level) {
+		case "PRICE_LEVEL_FREE":
+		case "PRICE_LEVEL_INEXPENSIVE":
+			return 1;
+		case "PRICE_LEVEL_MODERATE":
+			return 2;
+		case "PRICE_LEVEL_EXPENSIVE":
+			return 3;
+		case "PRICE_LEVEL_VERY_EXPENSIVE":
+			return 4;
+		default:
+			return null;
+	}
+}
+
+const V1_FIELD_MASK = [
+	"places.id",
+	"places.displayName",
+	"places.formattedAddress",
+	"places.location",
+	"places.rating",
+	"places.userRatingCount",
+	"places.priceLevel",
+	"places.types",
+	"places.photos.name",
+	"places.websiteUri",
+	"places.nationalPhoneNumber",
+	"places.editorialSummary",
+].join(",");
+
+// Places API v1 searchText: one call returns details that previously needed
+// a second Place Details request (phone, website, summary).
+async function searchPlacesV1(
+	query: string,
+	region: string,
+	geo?: SearchGeo | null,
+): Promise<PlaceResult[]> {
+	const body: any = {
+		textQuery: geo ? query : `${query} ${region}`,
+		languageCode: "en",
+		maxResultCount: 20,
+	};
+	if (geo) {
+		body.locationBias = {
+			circle: {
+				center: { latitude: geo.latitude, longitude: geo.longitude },
+				radius: Math.min(geo.radiusMeters, 50000),
+			},
+		};
+	}
+
+	const { data } = await axios.post(
+		"https://places.googleapis.com/v1/places:searchText",
+		body,
+		{
+			headers: {
+				"X-Goog-Api-Key": GOOGLE_API_KEY!,
+				"X-Goog-FieldMask": V1_FIELD_MASK,
+				"Content-Type": "application/json",
+			},
+		},
+	);
+
+	return (data.places || []).map(
+		(place: any): PlaceResult => ({
+			external_id: place.id,
+			source: "google",
+			name: place.displayName?.text || "",
+			category: mapCategory(place.types || []),
+			description: place.editorialSummary?.text || null,
+			address: place.formattedAddress || null,
+			region,
+			country: geo?.country || "",
+			latitude: place.location?.latitude ?? null,
+			longitude: place.location?.longitude ?? null,
+			phone: place.nationalPhoneNumber || null,
+			website: place.websiteUri || null,
+			rating: place.rating || null,
+			review_count: place.userRatingCount || 0,
+			price_level: mapPriceLevelV1(place.priceLevel),
+			// v1 photo resource names ("places/{id}/photos/{id}") — already
+			// supported by fetchPhotoBuffer
+			photos: (place.photos || []).slice(0, 5).map((p: any) => p.name),
+			opening_hours: null,
+			tags: (place.types || []).filter(
+				(t: string) => !["point_of_interest", "establishment"].includes(t),
+			),
+			raw_data: { place_id: place.id, types: place.types },
+		}),
+	);
+}
+
 export async function searchPlaces(
 	query: string,
 	region: string,
@@ -66,8 +160,17 @@ export async function searchPlaces(
 ): Promise<PlaceResult[]> {
 	if (!GOOGLE_API_KEY) throw new Error("GOOGLE_PLACES_API_KEY not set");
 
-	// Location bias from geocoded destination when available; otherwise the
-	// destination text itself scopes the search. No hardcoded geography.
+	// Prefer Places API v1 (richer data, one call); fall back to legacy
+	// textsearch when v1 is not enabled on this key.
+	try {
+		return await searchPlacesV1(query, region, geo);
+	} catch (err: any) {
+		const status = err?.response?.status;
+		console.warn(
+			`Places v1 unavailable (${status || err?.message}); falling back to legacy textsearch`,
+		);
+	}
+
 	const params: Record<string, string> = {
 		query: geo ? query : `${query} ${region}`,
 		key: GOOGLE_API_KEY,

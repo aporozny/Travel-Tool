@@ -218,3 +218,85 @@ describe("scoreOperator — score bounds", () => {
 		expect(t).toBeLessThanOrEqual(100);
 	});
 });
+
+// --- Stage 2: social proof + learned affinities ---
+import {
+  socialScore,
+  affinityMatch,
+  MAX_SOCIAL_SCORE,
+  AFFINITY_MIN_INTERACTIONS,
+} from "../src/services/recommendations";
+import { mapPriceLevelV1 } from "../src/services/googlePlaces";
+
+describe("socialScore", () => {
+  it("is 0 with no community signal", () => {
+    expect(socialScore(undefined)).toBe(0);
+    expect(socialScore({ weighted: 0, saves: 0, books: 0 })).toBe(0);
+  });
+
+  it("grows with interest and caps at MAX_SOCIAL_SCORE", () => {
+    const few = socialScore({ weighted: 3, saves: 1, books: 0 });
+    const many = socialScore({ weighted: 300, saves: 60, books: 20 });
+    expect(few).toBeGreaterThan(0);
+    expect(many).toBeGreaterThan(few);
+    expect(many).toBeLessThanOrEqual(MAX_SOCIAL_SCORE);
+  });
+
+  it("community interest breaks ties between otherwise equal places", () => {
+    const mk = (weighted: number) => {
+      const b = scoreOperator(
+        { category: "activity", tags: ["scuba_diving"], rating: 4.5,
+          review_count: 100, price_level: 2, region: "nusa penida" },
+        basePrefs, "nusa penida", { weighted, saves: weighted, books: 0 },
+      );
+      return total(b);
+    };
+    expect(mk(50)).toBeGreaterThan(mk(0));
+  });
+});
+
+describe("affinityMatch / behaviour blending", () => {
+  const diveAffinity = {
+    totalInteractions: 10,
+    tags: { scuba_diving: 1.0, diving: 0.8 },
+  };
+
+  it("ignores behaviour below the cold-start threshold", () => {
+    const coldStart = { totalInteractions: AFFINITY_MIN_INTERACTIONS - 1, tags: { scuba_diving: 1.0 } };
+    expect(affinityMatch(["scuba_diving"], coldStart)).toBe(0);
+  });
+
+  it("behaviour outweighs onboarding once history exists (Executive decision)", () => {
+    // User whose onboarding says hiking only, but who keeps booking dive trips
+    const hikerPrefs = { ...basePrefs, water_activities: [], land_activities: ["hiking"] };
+    const diveShop = {
+      category: "activity", tags: ["scuba_diving"], rating: 4.5,
+      review_count: 100, price_level: 2, region: "nusa penida",
+    };
+    const withoutHistory = scoreOperator(diveShop, hikerPrefs, "nusa penida").activity;
+    const withHistory = scoreOperator(diveShop, hikerPrefs, "nusa penida", undefined, diveAffinity).activity;
+    expect(withoutHistory).toBe(0); // pure prefs: no match
+    expect(withHistory).toBeGreaterThanOrEqual(15); // behaviour dominates (60% weight)
+  });
+
+  it("dietary requirements are not diluted by behaviour", () => {
+    const steakhouse = {
+      category: "food", tags: ["steakhouse"], rating: 4.5,
+      review_count: 100, price_level: 2, region: "canggu",
+    };
+    const steakAffinity = { totalInteractions: 20, tags: { steakhouse: 1.0 } };
+    const b = scoreOperator(steakhouse, basePrefs, "canggu", undefined, steakAffinity);
+    // vegan user: affinity bonus (≤6) cannot fake dietary fit (0 base)
+    expect(b.dietary).toBeLessThanOrEqual(6);
+  });
+});
+
+describe("mapPriceLevelV1", () => {
+  it("maps v1 enums to numeric levels", () => {
+    expect(mapPriceLevelV1("PRICE_LEVEL_INEXPENSIVE")).toBe(1);
+    expect(mapPriceLevelV1("PRICE_LEVEL_MODERATE")).toBe(2);
+    expect(mapPriceLevelV1("PRICE_LEVEL_EXPENSIVE")).toBe(3);
+    expect(mapPriceLevelV1("PRICE_LEVEL_VERY_EXPENSIVE")).toBe(4);
+    expect(mapPriceLevelV1(undefined)).toBeNull();
+  });
+});
