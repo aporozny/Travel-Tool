@@ -300,3 +300,72 @@ describe("mapPriceLevelV1", () => {
     expect(mapPriceLevelV1(undefined)).toBeNull();
   });
 });
+
+// --- Stage 3: cross-source dedup + viator destination matching ---
+import { dedupPlaces, normalizeName, metersApart } from "../src/services/dedup";
+import { matchDestination } from "../src/services/viator";
+
+describe("dedupPlaces", () => {
+  const google = {
+    source: "google", name: "Warung Bintang", latitude: -8.6501, longitude: 115.2201,
+    phone: null, website: "https://bintang.example", photos: ["g1"], is_claimed: false,
+  };
+  const foursquare = {
+    source: "foursquare", name: "The Warung Bintang", latitude: -8.6503, longitude: 115.2202,
+    phone: "+62 361 123", website: null, photos: ["f1"], is_claimed: false,
+  };
+
+  it("collapses the same venue across sources, keeping the higher-ranked source", () => {
+    const out = dedupPlaces([google, foursquare]);
+    expect(out).toHaveLength(1);
+    expect(out[0].source).toBe("google");
+  });
+
+  it("merges missing fields from the duplicate (phone from foursquare)", () => {
+    const out = dedupPlaces([google, foursquare]);
+    expect(out[0].phone).toBe("+62 361 123");
+    expect(out[0].website).toBe("https://bintang.example");
+  });
+
+  it("keeps distinct venues with the same name far apart", () => {
+    const other = { ...foursquare, latitude: -8.7000, longitude: 115.3000 };
+    expect(dedupPlaces([google, other])).toHaveLength(2);
+  });
+
+  it("never collapses viator products into POIs", () => {
+    const tour = { source: "viator", name: "Warung Bintang", latitude: null, longitude: null };
+    expect(dedupPlaces([google, tour])).toHaveLength(2);
+  });
+
+  it("claimed rows beat unclaimed regardless of source rank", () => {
+    const claimedFsq = { ...foursquare, is_claimed: true };
+    const out = dedupPlaces([google, claimedFsq]);
+    expect(out).toHaveLength(1);
+    expect(out[0].source).toBe("foursquare");
+  });
+});
+
+describe("normalizeName / metersApart", () => {
+  it("normalizes articles, diacritics and punctuation", () => {
+    expect(normalizeName("The Café Bintang!")).toBe(normalizeName("cafe bintang"));
+  });
+  it("computes plausible distances", () => {
+    const d = metersApart(-8.6501, 115.2201, -8.6503, 115.2202);
+    expect(d).toBeGreaterThan(10);
+    expect(d).toBeLessThan(50);
+  });
+});
+
+describe("matchDestination", () => {
+  const dests = [
+    { destinationId: 1, name: "Lisbon", type: "CITY" },
+    { destinationId: 2, name: "Lisbon", type: "REGION" },
+    { destinationId: 3, name: "Bali", type: "REGION" },
+  ];
+  it("prefers CITY over broader types on exact match", () => {
+    expect(matchDestination(dests as any, "lisbon")?.destinationId).toBe(1);
+  });
+  it("returns null for unknown destinations", () => {
+    expect(matchDestination(dests as any, "Atlantis")).toBeNull();
+  });
+});

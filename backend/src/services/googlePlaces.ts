@@ -32,7 +32,7 @@ function mapCategory(types: string[]): string {
 
 export interface PlaceResult {
 	external_id: string;
-	source: "google";
+	source: "google" | "foursquare" | "viator" | "google_places_v2";
 	name: string;
 	category: string;
 	description: string | null;

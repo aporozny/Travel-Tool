@@ -520,7 +520,7 @@ export async function getRecommendations(
            pc.rating, pc.review_count
     FROM places_cache pc
     WHERE pc.expires_at > NOW()
-  AND pc.source = 'google_places_v2'
+  AND pc.source IN ('google_places_v2', 'google', 'foursquare', 'viator')
   `;
 	const placeParams: any[] = [];
 	let placeParamCount = 1;

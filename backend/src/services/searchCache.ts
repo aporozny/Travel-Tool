@@ -1,6 +1,9 @@
 import { pool } from "../utils/db";
 import { searchPlaces, getPlaceDetails, PlaceResult } from "./googlePlaces";
 import { geocodeDestination, GeoResult } from "./geocoding";
+import { searchViatorProducts, viatorEnabled } from "./viator";
+import { searchFoursquare, foursquareEnabled } from "./foursquare";
+import { dedupPlaces } from "./dedup";
 
 const CACHE_TTL_DAYS = 30;
 
@@ -157,11 +160,21 @@ async function getCatalogResults(
 	const params: any[] = [];
 	const geoRes = geoConditions(geo, params, 1);
 	const conditions: string[] = [
-		`pc.source IN ('google_places_v2', 'google')`,
+		`pc.source IN ('google_places_v2', 'google', 'foursquare', 'viator')`,
 		`pc.expires_at > NOW()`,
-		...geoRes.sql,
 	];
 	let n = geoRes.nextIndex;
+	// Viator products carry no coordinates — match them by region name while
+	// POI sources use the geo filter.
+	if (geoRes.sql.length > 0 && geo.region) {
+		conditions.push(
+			`((${geoRes.sql.join(" AND ")}) OR (pc.source = 'viator' AND pc.region ILIKE $${n}))`,
+		);
+		params.push(`%${geo.region}%`);
+		n++;
+	} else {
+		conditions.push(...geoRes.sql);
+	}
 
 	if (category) {
 		conditions.push(`pc.category = $${n++}`);
@@ -210,27 +223,45 @@ export async function search(
 ): Promise<{ results: any[]; source: "catalog" | "google"; total: number }> {
 	const geo = await resolveGeo(region);
 
-	// 1. Coverage check: top up from the live source when the catalog is thin
-	// near this destination, not only when it is empty.
+	// 1. Coverage check: top up from live sources when the catalog is thin
+	// near this destination, not only when it is empty. Sources fan out in
+	// parallel; one failing source never blocks the others.
 	let fetchedLive = false;
 	try {
 		const coverage = await coverageCount(geo, category);
 		if (coverage < MIN_COVERAGE) {
-			const places = await searchPlaces(query, region, geo.point ?? null);
+			const wantTours = !category || category === "activity";
+			const [google, viator, foursquare] = await Promise.allSettled([
+				searchPlaces(query, region, geo.point ?? null),
+				wantTours && viatorEnabled() && geo.point
+					? searchViatorProducts(geo.point.name, geo.point.country)
+					: Promise.resolve([] as PlaceResult[]),
+				foursquareEnabled() && geo.point
+					? searchFoursquare(query, geo.point.name, geo.point)
+					: Promise.resolve([] as PlaceResult[]),
+			]);
+			const fetched: PlaceResult[] = [];
+			for (const r of [google, viator, foursquare]) {
+				if (r.status === "fulfilled") fetched.push(...r.value);
+				else console.error("Source fetch failed:", r.reason?.message);
+			}
 			const filtered = category
-				? places.filter((p) => p.category === category)
-				: places;
+				? fetched.filter(
+						(p) => p.category === category || p.source === "viator",
+					)
+				: fetched;
 			await upsertPlaces(filtered);
 			await recordQuery(query, region, category, filtered.length);
-			fetchedLive = true;
+			fetchedLive = filtered.length > 0;
 		}
 	} catch (err) {
 		console.error("Live places top-up failed:", err);
 		// degrade to whatever the catalog has
 	}
 
-	// 2. Serve from the catalog (both sources), which now includes any top-up.
-	const results = await getCatalogResults(query, geo, category, limit);
+	// 2. Serve from the catalog (all sources), deduped across sources.
+	const rows = await getCatalogResults(query, geo, category, limit * 2);
+	const results = dedupPlaces(rows).slice(0, limit);
 	return {
 		results,
 		source: fetchedLive ? "google" : "catalog",
