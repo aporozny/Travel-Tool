@@ -14,12 +14,12 @@
 | WP1.6 | — | Typecheck, test run, atomic commits, deploy, live verification | 6 |
 
 ## Quality checks (gate to close stage)
-- [ ] `npm run build` clean
-- [ ] `npm test` green (scoring suite)
-- [ ] No "Bali Indonesia" literal in source fetch path
-- [ ] Production `/health` OK after deploy
-- [ ] Live search for a never-fetched city returns results
-- [ ] Registers updated; end-stage report below
+- [x] `npm run build` clean
+- [x] `npm test` green (scoring suite) — 12/12
+- [x] No "Bali Indonesia" literal in source fetch path
+- [x] Production `/health` OK after deploy
+- [x] Live search for a never-fetched city returns results (Lisbon: 20, country=Portugal)
+- [x] Registers updated; end-stage report below
 
 ## Tolerances
 Scope fixed (WP1.1–1.6). Time: one working session ±1. Any product blocked → escalate, do not silently drop.
@@ -27,4 +27,10 @@ Scope fixed (WP1.1–1.6). Time: one working session ±1. Any product blocked �
 ---
 
 ## End-stage report
-_To be completed at stage close._
+**Stage 1 closed 2026-07-10 — all products delivered.**
+
+- P1–P5 implemented, tested (12/12 scoring tests), deployed to production via image rebuild.
+- E2E verified: Lisbon (never-fetched) returns 20 restaurants with country=Portugal; Bali regression clean (20 results); drifttravel.app HTTP 200.
+- Issues I1–I5 closed. New: I9 (pre-existing test debt), I10 (root-owned file recurrence).
+- Deviations: none of scope; one extra fix (plural/singular query matching in catalog reads) found during live verification and included in WP1.4.
+- Recommendation: proceed to Stage 2 (social-proof ranking + interaction learning loop) after Executive review of registers.
