@@ -3,7 +3,7 @@ import { redis } from "../utils/redis";
 import { PlaceResult } from "./googlePlaces";
 
 const VIATOR_API_KEY = process.env.VIATOR_API_KEY;
-const BASE = "https://api.viator.com/partner";
+const BASE = process.env.VIATOR_API_BASE || "https://api.viator.com/partner";
 const DEST_CACHE_KEY = "viator:destinations";
 const DEST_CACHE_TTL = 7 * 24 * 3600; // destination taxonomy changes rarely
 
