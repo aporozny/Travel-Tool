@@ -51,7 +51,7 @@ docker exec traveller-postgres pg_restore -U traveller -d traveller_dev --clean 
 
 # 3. Backend
 docker compose up -d --build backend
-curl -s localhost:5001/api/health   # expect OK
+curl -s localhost:5001/health   # expect {"status":"ok",...}
 
 # 4. Frontend
 cd web && npm ci && npm run build && cd ..   # outputs web/dist (nginx serves in place)
