@@ -42,6 +42,12 @@ const CACHE_TTL_DAYS = 30;
 // the live source. Prevents a handful of stale rows suppressing refresh forever.
 export const MIN_COVERAGE = 12;
 
+// Total places (summed across all categories) a sub-area needs before it's
+// worth offering as a browsable chip. Deliberately a simple v1 floor, not
+// a per-category rule — sub_area_coverage still stores per-category counts
+// for future refinement/dashboarding, this is just the launch gate.
+const SUB_AREA_MIN_TOTAL = 5;
+
 const CATEGORIES = ["food", "accommodation", "activity", "transport"] as const;
 
 // A single generic "things to do" query skews heavily toward attractions —
@@ -95,14 +101,15 @@ async function upsertPlaces(places: PlaceResult[]): Promise<void> {
 		p.opening_hours ? JSON.stringify(p.opening_hours) : null,
 		p.tags,
 		JSON.stringify(p.raw_data),
+		p.raw_subregion_tag,
 	]);
 
 	// Build parameterised bulk insert
 	const rowPlaceholders = values
 		.map((_, i) => {
-			const base = i * 19;
+			const base = i * 20;
 			const params = Array.from(
-				{ length: 19 },
+				{ length: 20 },
 				(_, j) => `$${base + j + 1}`,
 			).join(", ");
 			return `(${params}, NOW(), NOW() + INTERVAL '${CACHE_TTL_DAYS} days')`;
@@ -115,13 +122,14 @@ async function upsertPlaces(places: PlaceResult[]): Promise<void> {
 		`INSERT INTO places_cache (
        external_id, source, name, category, description, address, region, country,
        latitude, longitude, phone, website, rating, review_count, price_level,
-       photos, opening_hours, tags, raw_data, updated_at, expires_at
+       photos, opening_hours, tags, raw_data, raw_subregion_tag, updated_at, expires_at
      ) VALUES ${rowPlaceholders}
      ON CONFLICT (external_id, source) DO UPDATE SET
        name = EXCLUDED.name,
        rating = EXCLUDED.rating,
        review_count = EXCLUDED.review_count,
        photos = EXCLUDED.photos,
+       raw_subregion_tag = COALESCE(EXCLUDED.raw_subregion_tag, places_cache.raw_subregion_tag),
        updated_at = NOW(),
        expires_at = NOW() + INTERVAL '${CACHE_TTL_DAYS} days'`,
 		flatValues,
@@ -201,6 +209,7 @@ async function queryCatalog(
 	geo: ResolvedGeo,
 	category?: string,
 	limit = 20,
+	subAreaId?: string,
 ) {
 	const params: any[] = [];
 	const geoRes = geoConditions(geo, params, 1);
@@ -209,6 +218,10 @@ async function queryCatalog(
 		`pc.expires_at > NOW()`,
 	];
 	let n = geoRes.nextIndex;
+	if (subAreaId) {
+		conditions.push(`pc.sub_area_id = $${n++}`);
+		params.push(subAreaId);
+	}
 	// Viator products carry no coordinates — match them by region name while
 	// POI sources use the geo filter.
 	if (geoRes.sql.length > 0 && geo.region) {
@@ -272,12 +285,15 @@ async function getCatalogResults(
 	geo: ResolvedGeo,
 	category?: string,
 	limit = 20,
+	subAreaId?: string,
 ) {
-	if (category) return queryCatalog(query, geo, category, limit);
+	if (category) return queryCatalog(query, geo, category, limit, subAreaId);
 
 	const perCategoryLimit = Math.ceil(limit / CATEGORIES.length);
 	const perCategory = await Promise.all(
-		CATEGORIES.map((cat) => queryCatalog(query, geo, cat, perCategoryLimit)),
+		CATEGORIES.map((cat) =>
+			queryCatalog(query, geo, cat, perCategoryLimit, subAreaId),
+		),
 	);
 	const interleaved: any[] = [];
 	const maxLen = Math.max(...perCategory.map((rows) => rows.length));
@@ -289,11 +305,40 @@ async function getCatalogResults(
 	return interleaved.slice(0, limit);
 }
 
+// Sub-areas offered for a searched region. Gated entirely by the
+// precomputed sub_area_coverage snapshot from scripts/resolve-sub-areas.ts
+// — never checked live, so what's offered is always what's actually there.
+export async function getSubregions(
+	region: string,
+): Promise<{ name: string; slug: string; count: number }[]> {
+	const geo = await resolveGeo(region);
+	const canonicalRegion = geo.point?.name || region;
+
+	const { rows } = await pool.query(
+		`SELECT sa.canonical_name AS name, sa.canonical_slug AS slug,
+            SUM(sac.row_count) AS total
+     FROM sub_areas sa
+     JOIN sub_area_coverage sac ON sac.sub_area_id = sa.id
+     WHERE sa.region = $1
+     GROUP BY sa.id, sa.canonical_name, sa.canonical_slug
+     HAVING SUM(sac.row_count) >= $2
+     ORDER BY total DESC`,
+		[canonicalRegion, SUB_AREA_MIN_TOTAL],
+	);
+
+	return rows.map((r) => ({
+		name: r.name,
+		slug: r.slug,
+		count: parseInt(r.total, 10),
+	}));
+}
+
 export async function search(
 	query: string,
 	region: string,
 	category?: string,
 	limit = 20,
+	subArea?: string,
 ): Promise<{
 	results: any[];
 	source: "catalog" | "google";
@@ -304,6 +349,20 @@ export async function search(
 	// Store and report under the geocoded canonical name so "lisbon portugal"
 	// and "Lisbon" share one catalog identity.
 	const canonicalRegion = geo.point?.name || region;
+
+	// Sub-area is a post-hoc grouping of already-cached places, resolved by
+	// the offline batch job (scripts/resolve-sub-areas.ts) — never fetched
+	// or decided live here. Unknown/misspelled slugs just return no filter
+	// match rather than erroring, so a stale bookmark doesn't break search.
+	let subAreaId: string | undefined;
+	if (subArea) {
+		const slug = subArea.toLowerCase().trim();
+		const { rows } = await pool.query(
+			`SELECT id FROM sub_areas WHERE region = $1 AND canonical_slug = $2 LIMIT 1`,
+			[canonicalRegion, slug],
+		);
+		subAreaId = rows[0]?.id;
+	}
 
 	// 1. Coverage check: top up from live sources when the catalog is thin,
 	// per category — not in aggregate (see CATEGORY_QUERY comment above).
@@ -382,7 +441,7 @@ export async function search(
 	}
 
 	// 2. Serve from the catalog (all sources), deduped across sources.
-	const rows = await getCatalogResults(query, geo, category, limit * 2);
+	const rows = await getCatalogResults(query, geo, category, limit * 2, subAreaId);
 	const results = dedupPlaces(rows).slice(0, limit);
 
 	// Attach community interest (saves/books) for result-card social proof.

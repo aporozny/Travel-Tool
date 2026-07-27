@@ -50,6 +50,24 @@ export interface PlaceResult {
 	opening_hours: any;
 	tags: string[];
 	raw_data: any;
+	// Captured live from Google's addressComponents — non-authoritative,
+	// never shown to users directly. Resolved into a real sub_area by the
+	// batch job (see sub_areas.ts), never live.
+	raw_subregion_tag: string | null;
+}
+
+// Sublocality/neighborhood component types, most-specific first. Excludes
+// "locality" deliberately — that's usually just the city/region itself,
+// not a useful sub-area.
+const SUBREGION_TYPES = ["sublocality_level_1", "sublocality", "neighborhood"];
+
+function extractSubregionTag(addressComponents: any[] | undefined): string | null {
+	if (!addressComponents) return null;
+	for (const t of SUBREGION_TYPES) {
+		const comp = addressComponents.find((c: any) => (c.types || []).includes(t));
+		if (comp?.longText || comp?.long_name) return comp.longText || comp.long_name;
+	}
+	return null;
 }
 
 export interface SearchGeo {
@@ -89,6 +107,7 @@ const V1_FIELD_MASK = [
 	"places.websiteUri",
 	"places.nationalPhoneNumber",
 	"places.editorialSummary",
+	"places.addressComponents",
 ].join(",");
 
 // Places API v1 searchText: one call returns details that previously needed
@@ -149,6 +168,7 @@ async function searchPlacesV1(
 				(t: string) => !["point_of_interest", "establishment"].includes(t),
 			),
 			raw_data: { place_id: place.id, types: place.types },
+			raw_subregion_tag: extractSubregionTag(place.addressComponents),
 		}),
 	);
 }
@@ -223,6 +243,8 @@ export async function searchPlaces(
 				types: place.types,
 				name: place.name,
 			}, // stripped raw_data - no need to store full response
+			// Legacy textsearch doesn't return structured address components.
+			raw_subregion_tag: null,
 		}),
 	);
 }

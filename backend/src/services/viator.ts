@@ -126,6 +126,8 @@ export async function searchViatorProducts(
 					currency: p.pricing?.currency,
 					duration: p.duration,
 				},
+				// Viator products carry no structured address components.
+				raw_subregion_tag: null,
 			}),
 		);
 	} catch (err: any) {

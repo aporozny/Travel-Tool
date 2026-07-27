@@ -75,6 +75,9 @@ export async function searchFoursquare(
 						.replace(/\s+/g, "_"),
 				),
 				raw_data: { fsq_id: p.fsq_id },
+				// Foursquare's basic search response has no structured address
+				// components in the fields we request.
+				raw_subregion_tag: null,
 			}),
 		);
 	} catch (err: any) {

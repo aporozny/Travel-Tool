@@ -9,7 +9,7 @@ export const recommendationsRouter = Router();
 // Personalized if authenticated, anonymous ranking if not
 recommendationsRouter.get('/', optionalAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { category, region, limit, refresh } = req.query;
+    const { category, region, limit, refresh, sub_area } = req.query;
 
     const results = await getRecommendations(
       req.user?.id || null,
@@ -18,6 +18,7 @@ recommendationsRouter.get('/', optionalAuth, async (req: AuthenticatedRequest, r
         region: region as string,
         limit: Math.min(parseInt(limit as string) || 20, 50),
         forceRefresh: refresh === 'true',
+        subArea: sub_area as string,
       }
     );
 

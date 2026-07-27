@@ -1,6 +1,11 @@
 import { Router, Request, Response } from "express";
 import { z } from "zod";
-import { search, getPlaceById, enrichPlace } from "../services/searchCache";
+import {
+	search,
+	getPlaceById,
+	enrichPlace,
+	getSubregions,
+} from "../services/searchCache";
 import { pool } from "../utils/db";
 import { authenticate, AuthenticatedRequest } from "../middleware/authenticate";
 
@@ -14,6 +19,7 @@ const searchSchema = z.object({
 		.enum(["food", "accommodation", "activity", "transport"])
 		.optional(),
 	limit: z.coerce.number().int().min(1).max(50).default(20),
+	sub_area: z.string().optional(),
 });
 
 // GET /api/v1/search?q=diving&region=nusa-penida&category=activity
@@ -26,6 +32,7 @@ searchRouter.get("/", async (req: Request, res: Response) => {
 			params.region,
 			params.category,
 			params.limit,
+			params.sub_area,
 		);
 
 		return res.json({
@@ -33,6 +40,7 @@ searchRouter.get("/", async (req: Request, res: Response) => {
 			region: params.region,
 			geo,
 			category: params.category || null,
+			sub_area: params.sub_area || null,
 			source,
 			total,
 			results,
@@ -45,6 +53,24 @@ searchRouter.get("/", async (req: Request, res: Response) => {
 		}
 		console.error(err);
 		return res.status(500).json({ message: "Search failed" });
+	}
+});
+
+// GET /api/v1/search/subregions?region=Singapore - neighborhoods/suburbs
+// worth offering for this destination, gated by precomputed coverage.
+searchRouter.get("/subregions", async (req: Request, res: Response) => {
+	try {
+		const region = z.string().min(1).max(200).parse(req.query.region);
+		const subregions = await getSubregions(region);
+		return res.json({ region, subregions });
+	} catch (err) {
+		if (err instanceof z.ZodError) {
+			return res
+				.status(400)
+				.json({ message: "Validation error", errors: err.errors });
+		}
+		console.error(err);
+		return res.status(500).json({ message: "Internal server error" });
 	}
 });
 

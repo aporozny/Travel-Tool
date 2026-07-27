@@ -236,6 +236,10 @@ export default function ExploreScreen({
 	const [personalized, setPersonalized] = useState(false);
 	const [category, setCategory] = useState("");
 	const [region, setRegion] = useState("");
+	const [subArea, setSubArea] = useState("");
+	const [subregions, setSubregions] = useState<
+		{ name: string; slug: string; count: number }[]
+	>([]);
 	const [destInput, setDestInput] = useState("");
 	const [recent, setRecent] = useState<string[]>(loadRecent);
 	const [search, setSearch] = useState("");
@@ -249,12 +253,29 @@ export default function ExploreScreen({
 		regionRef.current = region;
 	}, [region]);
 
+	// Sub-areas worth offering for this destination — gated by the backend
+	// (only well-covered neighborhoods come back), so an empty/short list
+	// here just means this destination doesn't have meaningful sub-areas
+	// yet, not that the fetch failed.
+	useEffect(() => {
+		setSubArea("");
+		if (!region) {
+			setSubregions([]);
+			return;
+		}
+		api
+			.get("/search/subregions", { params: { region } })
+			.then((r: any) => setSubregions(r.data.subregions || []))
+			.catch(() => setSubregions([]));
+	}, [region]);
+
 	const fetchResults = useCallback(async () => {
 		setLoading(true);
 		try {
 			const params: any = { limit: 40 };
 			if (category) params.category = category;
 			if (region) params.region = region;
+			if (subArea) params.sub_area = subArea;
 			if (needsRefresh.current) {
 				params.refresh = "true";
 				needsRefresh.current = false;
@@ -275,7 +296,7 @@ export default function ExploreScreen({
 		} finally {
 			setLoading(false);
 		}
-	}, [category, region]);
+	}, [category, region, subArea]);
 
 	useEffect(() => {
 		fetchResults();
@@ -496,6 +517,37 @@ export default function ExploreScreen({
 						))}
 					</div>
 				</div>
+
+				{/* Sub-area (neighborhood/suburb) filters — only shown when the
+				    destination actually has more than one worth offering. A
+				    single-town destination looks identical to today. */}
+				{subregions.length >= 2 && (
+					<div style={styles.filterRow}>
+						<div style={styles.filterScroll}>
+							<button
+								style={{
+									...styles.filterChip,
+									...(subArea === "" ? styles.filterChipActive : {}),
+								}}
+								onClick={() => setSubArea("")}
+							>
+								All {region}
+							</button>
+							{subregions.map((s) => (
+								<button
+									key={s.slug}
+									style={{
+										...styles.filterChip,
+										...(subArea === s.slug ? styles.filterChipActive : {}),
+									}}
+									onClick={() => setSubArea(subArea === s.slug ? "" : s.slug)}
+								>
+									{s.name}
+								</button>
+							))}
+						</div>
+					</div>
+				)}
 
 				{personalized && (
 					<p style={styles.personalizedNote}>✦ Ranked by your preferences</p>

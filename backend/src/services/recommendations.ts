@@ -502,13 +502,28 @@ export async function getRecommendations(
 		region?: string;
 		limit?: number;
 		forceRefresh?: boolean;
+		subArea?: string;
 	} = {},
 ): Promise<RecommendationResult[]> {
-	const { category, region, limit = 20, forceRefresh = false } = options;
+	const { category, region, limit = 20, forceRefresh = false, subArea } = options;
+
+	// Sub-area is a places_cache-only concept (operators aren't assigned one),
+	// resolved the same way search() resolves it: by slug against the
+	// region's already-canonical name. ExploreScreen always passes the
+	// canonical name here (learned from /search's warm-up call), so no
+	// separate geocode lookup is needed.
+	let subAreaId: string | undefined;
+	if (subArea && region) {
+		const { rows } = await pool.query(
+			`SELECT id FROM sub_areas WHERE region = $1 AND canonical_slug = $2 LIMIT 1`,
+			[region, subArea.toLowerCase().trim()],
+		);
+		subAreaId = rows[0]?.id;
+	}
 
 	// Check recommendation cache for authenticated users
 	if (userId && !forceRefresh) {
-		const cacheKey = `rec:${userId}:${category || "all"}:${region || "all"}`;
+		const cacheKey = `rec:${userId}:${category || "all"}:${region || "all"}:${subArea || "all"}`;
 		const cached = await redis.get(cacheKey);
 		if (cached) {
 			return JSON.parse(cached).slice(0, limit);
@@ -567,6 +582,11 @@ export async function getRecommendations(
 	if (region) {
 		placeQuery += ` AND pc.region ILIKE $${placeParamCount}`;
 		placeParams.push(`%${region}%`);
+		placeParamCount++;
+	}
+	if (subAreaId) {
+		placeQuery += ` AND pc.sub_area_id = $${placeParamCount}`;
+		placeParams.push(subAreaId);
 		placeParamCount++;
 	}
 	placeQuery += ` ORDER BY pc.is_claimed DESC, pc.rating DESC LIMIT 100`;
