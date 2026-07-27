@@ -14,13 +14,16 @@ const FETCH_DAILY_BUDGET = parseInt(
 	10,
 );
 
-// Returns true when this fan-out is within today's budget. Fails open on
-// Redis errors — a broken counter must not disable discovery.
-async function withinFetchBudget(): Promise<boolean> {
+// Reserves `n` units of today's live-fetch budget (n = number of outbound
+// calls about to fire — one per thin category, plus Viator/Foursquare when
+// used). Fails open on Redis errors — a broken counter must not disable
+// discovery.
+async function reserveFetchBudget(n: number): Promise<boolean> {
+	if (n <= 0) return true;
 	try {
 		const key = `fetch-budget:${new Date().toISOString().slice(0, 10)}`;
-		const used = await redis.incr(key);
-		if (used === 1) await redis.expire(key, 26 * 3600);
+		const used = await redis.incrby(key, n);
+		if (used === n) await redis.expire(key, 26 * 3600);
 		if (used > FETCH_DAILY_BUDGET) {
 			console.warn(
 				`Fetch budget exhausted (${used}/${FETCH_DAILY_BUDGET}) — catalog-only until midnight UTC`,
@@ -38,6 +41,19 @@ const CACHE_TTL_DAYS = 30;
 // Below this many fresh rows per category near a destination we top up from
 // the live source. Prevents a handful of stale rows suppressing refresh forever.
 export const MIN_COVERAGE = 12;
+
+const CATEGORIES = ["food", "accommodation", "activity", "transport"] as const;
+
+// A single generic "things to do" query skews heavily toward attractions —
+// target each thin category so food/lodging/transport aren't starved by a
+// healthy-looking activity count (previously: aggregate coverage let 18
+// attraction rows mask zero hotels for a city the size of Singapore).
+const CATEGORY_QUERY: Record<string, string> = {
+	food: "restaurants and cafes",
+	accommodation: "hotels and places to stay",
+	activity: "things to do and attractions",
+	transport: "car rental and transport",
+};
 
 interface ResolvedGeo {
 	country?: string;
@@ -178,8 +194,9 @@ export async function coverageCount(
 	return parseInt(result.rows[0].c, 10);
 }
 
-// Query the catalog across BOTH sources (curated v2 + live google rows).
-async function getCatalogResults(
+// Query the catalog across BOTH sources (curated v2 + live google rows),
+// for a single category (or unfiltered when category is omitted).
+async function queryCatalog(
 	query: string,
 	geo: ResolvedGeo,
 	category?: string,
@@ -243,6 +260,35 @@ async function getCatalogResults(
 	return result.rows;
 }
 
+// Browse mode (no category filter) used to sort the whole candidate pool
+// by rating alone — a handful of 5-star car-rental listings could crowd
+// out food/lodging/activities on the served page even when the catalog
+// itself is well balanced (e.g. Windhoek: catalog had ~20 rows in every
+// category, but transport dominated 13/20 of what was actually shown).
+// Query each category separately and interleave so the page reflects the
+// catalog's real diversity.
+async function getCatalogResults(
+	query: string,
+	geo: ResolvedGeo,
+	category?: string,
+	limit = 20,
+) {
+	if (category) return queryCatalog(query, geo, category, limit);
+
+	const perCategoryLimit = Math.ceil(limit / CATEGORIES.length);
+	const perCategory = await Promise.all(
+		CATEGORIES.map((cat) => queryCatalog(query, geo, cat, perCategoryLimit)),
+	);
+	const interleaved: any[] = [];
+	const maxLen = Math.max(...perCategory.map((rows) => rows.length));
+	for (let i = 0; i < maxLen; i++) {
+		for (const rows of perCategory) {
+			if (rows[i]) interleaved.push(rows[i]);
+		}
+	}
+	return interleaved.slice(0, limit);
+}
+
 export async function search(
 	query: string,
 	region: string,
@@ -259,30 +305,69 @@ export async function search(
 	// and "Lisbon" share one catalog identity.
 	const canonicalRegion = geo.point?.name || region;
 
-	// 1. Coverage check: top up from live sources when the catalog is thin
-	// near this destination, not only when it is empty. Sources fan out in
-	// parallel; one failing source never blocks the others.
+	// 1. Coverage check: top up from live sources when the catalog is thin,
+	// per category — not in aggregate (see CATEGORY_QUERY comment above).
+	// Sources fan out in parallel; one failing source never blocks the rest.
 	let fetchedLive = false;
 	try {
-		const coverage = await coverageCount(geo, category);
-		if (coverage < MIN_COVERAGE && (await withinFetchBudget())) {
-			// Browse mode (no q): ask the live source for general highlights
-			const liveQuery = query.trim() || "things to do";
-			const wantTours = !category || category === "activity";
-			const [google, viator, foursquare] = await Promise.allSettled([
-				searchPlaces(liveQuery, canonicalRegion, geo.point ?? null),
-				wantTours && viatorEnabled() && geo.point
-					? searchViatorProducts(geo.point.name, geo.point.country)
+		const userQuery = query.trim();
+		const categoriesToCheck = category ? [category] : CATEGORIES;
+		const coverageByCategory = await Promise.all(
+			categoriesToCheck.map(async (cat) => ({
+				cat,
+				coverage: await coverageCount(geo, cat),
+			})),
+		);
+		const thinCategories = coverageByCategory
+			.filter((c) => c.coverage < MIN_COVERAGE)
+			.map((c) => c.cat);
+
+		const wantTours = thinCategories.includes("activity");
+		const willCallViator = wantTours && viatorEnabled() && !!geo.point;
+		const willCallFoursquare =
+			thinCategories.length > 0 && foursquareEnabled() && !!geo.point;
+		const totalCalls =
+			thinCategories.length +
+			(willCallViator ? 1 : 0) +
+			(willCallFoursquare ? 1 : 0);
+
+		if (totalCalls > 0 && (await reserveFetchBudget(totalCalls))) {
+			const [googleSettled, viator, foursquare] = await Promise.allSettled([
+				Promise.allSettled(
+					thinCategories.map((cat) =>
+						searchPlaces(
+							userQuery || CATEGORY_QUERY[cat],
+							canonicalRegion,
+							geo.point ?? null,
+						),
+					),
+				),
+				willCallViator
+					? searchViatorProducts(geo.point!.name, geo.point!.country)
 					: Promise.resolve([] as PlaceResult[]),
-				foursquareEnabled() && geo.point
-					? searchFoursquare(liveQuery, geo.point.name, geo.point)
+				willCallFoursquare
+					? searchFoursquare(
+							userQuery || "highlights",
+							geo.point!.name,
+							geo.point!,
+						)
 					: Promise.resolve([] as PlaceResult[]),
 			]);
+
 			const fetched: PlaceResult[] = [];
-			for (const r of [google, viator, foursquare]) {
-				if (r.status === "fulfilled") fetched.push(...r.value);
-				else console.error("Source fetch failed:", r.reason?.message);
+			if (googleSettled.status === "fulfilled") {
+				for (const r of googleSettled.value) {
+					if (r.status === "fulfilled") fetched.push(...r.value);
+					else
+						console.error("Google category fetch failed:", r.reason?.message);
+				}
 			}
+			if (viator.status === "fulfilled") fetched.push(...viator.value);
+			else console.error("Viator fetch failed:", viator.reason?.message);
+			if (foursquare.status === "fulfilled") fetched.push(...foursquare.value);
+			else
+				console.error("Foursquare fetch failed:", foursquare.reason?.message);
+
 			const filtered = category
 				? fetched.filter(
 						(p) => p.category === category || p.source === "viator",
