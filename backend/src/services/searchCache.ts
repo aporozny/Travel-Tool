@@ -5,6 +5,7 @@ import { geocodeDestination, GeoResult } from "./geocoding";
 import { searchViatorProducts, viatorEnabled } from "./viator";
 import { searchFoursquare, foursquareEnabled } from "./foursquare";
 import { dedupPlaces } from "./dedup";
+import { getSocialSignals } from "./recommendations";
 
 // Daily cap on live external fan-outs (R2: cost control). Over budget the
 // app serves catalog-only until midnight UTC. Override per environment.
@@ -247,8 +248,16 @@ export async function search(
 	region: string,
 	category?: string,
 	limit = 20,
-): Promise<{ results: any[]; source: "catalog" | "google"; total: number }> {
+): Promise<{
+	results: any[];
+	source: "catalog" | "google";
+	total: number;
+	geo: { name: string; country: string } | null;
+}> {
 	const geo = await resolveGeo(region);
+	// Store and report under the geocoded canonical name so "lisbon portugal"
+	// and "Lisbon" share one catalog identity.
+	const canonicalRegion = geo.point?.name || region;
 
 	// 1. Coverage check: top up from live sources when the catalog is thin
 	// near this destination, not only when it is empty. Sources fan out in
@@ -257,14 +266,16 @@ export async function search(
 	try {
 		const coverage = await coverageCount(geo, category);
 		if (coverage < MIN_COVERAGE && (await withinFetchBudget())) {
+			// Browse mode (no q): ask the live source for general highlights
+			const liveQuery = query.trim() || "things to do";
 			const wantTours = !category || category === "activity";
 			const [google, viator, foursquare] = await Promise.allSettled([
-				searchPlaces(query, region, geo.point ?? null),
+				searchPlaces(liveQuery, canonicalRegion, geo.point ?? null),
 				wantTours && viatorEnabled() && geo.point
 					? searchViatorProducts(geo.point.name, geo.point.country)
 					: Promise.resolve([] as PlaceResult[]),
 				foursquareEnabled() && geo.point
-					? searchFoursquare(query, geo.point.name, geo.point)
+					? searchFoursquare(liveQuery, geo.point.name, geo.point)
 					: Promise.resolve([] as PlaceResult[]),
 			]);
 			const fetched: PlaceResult[] = [];
@@ -278,7 +289,6 @@ export async function search(
 					)
 				: fetched;
 			await upsertPlaces(filtered);
-			await recordQuery(query, region, category, filtered.length);
 			fetchedLive = filtered.length > 0;
 		}
 	} catch (err) {
@@ -289,10 +299,43 @@ export async function search(
 	// 2. Serve from the catalog (all sources), deduped across sources.
 	const rows = await getCatalogResults(query, geo, category, limit * 2);
 	const results = dedupPlaces(rows).slice(0, limit);
+
+	// Attach community interest (saves/books) for result-card social proof.
+	// Same signal source the personalized recommendations service uses.
+	let resultsWithCommunity = results;
+	try {
+		const social = await getSocialSignals(results.map((r) => r.id));
+		resultsWithCommunity = results.map((r) => ({
+			...r,
+			community: {
+				saves: social.get(r.id)?.saves || 0,
+				books: social.get(r.id)?.books || 0,
+			},
+		}));
+	} catch (err) {
+		console.error("getSocialSignals failed:", err);
+	}
+
+	// Telemetry: record what was ultimately served (zero-result queries are
+	// the signal — they show where the catalog fails users).
+	try {
+		await recordQuery(
+			query || "(browse)",
+			canonicalRegion,
+			category,
+			results.length,
+		);
+	} catch (err) {
+		console.error("recordQuery failed:", err);
+	}
+
 	return {
-		results,
+		results: resultsWithCommunity,
 		source: fetchedLive ? "google" : "catalog",
 		total: results.length,
+		geo: geo.point
+			? { name: geo.point.name, country: geo.point.country }
+			: null,
 	};
 }
 

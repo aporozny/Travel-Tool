@@ -262,6 +262,22 @@ export async function getPlaceDetails(
 	};
 }
 
+// Google photo resource names expire well before our 30-day catalog TTL.
+// Fetch a fresh set for a place so stale rows can heal themselves.
+export async function refreshPlacePhotos(placeId: string): Promise<string[]> {
+	if (!GOOGLE_API_KEY) return [];
+	const { data } = await axios.get(
+		`https://places.googleapis.com/v1/places/${placeId}`,
+		{
+			headers: {
+				"X-Goog-Api-Key": GOOGLE_API_KEY,
+				"X-Goog-FieldMask": "photos",
+			},
+		},
+	);
+	return (data.photos || []).slice(0, 5).map((p: any) => p.name);
+}
+
 // Proxy: fetch photo from Google using reference, return buffer
 export async function fetchPhotoBuffer(
 	photoReference: string,

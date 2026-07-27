@@ -31,3 +31,7 @@ coverage/
 .idea/
 *.swp
 *.bak
+
+# Playwright CLI debug snapshots
+.playwright-cli/
+web/explore.yml

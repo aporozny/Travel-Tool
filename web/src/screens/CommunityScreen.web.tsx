@@ -208,7 +208,7 @@ function PostCard({ post, onReact, onComment }: {
           {post.media.slice(0, 3).map((url: string, i: number) => (
             <img
               key={i}
-              src={url.startsWith('/') ? `http://100.67.86.49${url}` : url}
+              src={url}
               style={{
                 ...styles.mediaImg,
                 ...(post.media.length === 1 ? styles.mediaImgFull : {}),
@@ -327,7 +327,7 @@ function ComposeModal({ onClose, onPosted }: { onClose: () => void; onPosted: ()
             {images.map((url, i) => (
               <div key={i} style={{ position: 'relative' }}>
                 <img
-                  src={`http://100.67.86.49${url}`}
+                  src={url}
                   style={styles.previewImg}
                   alt=""
                 />

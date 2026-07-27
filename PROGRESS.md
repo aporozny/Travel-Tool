@@ -263,3 +263,26 @@ It had ZERO `com.docker.compose.*` labels. Consequences:
 - Place claim links (claimed_by/operator_id) were nulled during this morning's places restore
 - DNS/SSL: verify drifttravel.app propagation, run Certbot
 - NEVER `docker run` postgres by hand again — only via docker-compose (see CONTRIBUTING.md)
+
+---
+SESSION 2026-07-09
+
+Completed
+- Diagnosed and resolved PM2 reboot issue. VPS had rebooted 4 days prior. Deleted stale pre-Docker travel-tool-api PM2 process targeting Docker hostname redis, causing 28s login timeouts.
+- Confirmed production stack is fully Docker-based: traveller-backend port 5001, traveller-postgres, traveller-redis.
+- Removed drift.bak duplicate from /etc/nginx/sites-enabled. Reloaded nginx.
+- Corrected project path in Claude memory. Repo lives at /home/andre/projects/drift.
+- Committed and pushed 3 commits: geocoding + search caching + recommendation scoring with tests, MobileMessage SMS provider, compose env vars and PM docs.
+- Deployed new container image via docker compose build and up -d.
+- Added destination intelligence plan to docs/pm/.
+
+Outstanding
+- Run pm2 startup to protect against next reboot.
+- Rotate MobileMessage API password (was exposed in chat session).
+- Fix Redis hostname in test env: expose port in compose, set REDIS_URL=redis://localhost:6379 in test script.
+- Verify JWT_SECRET and NODE_ENV production changes are active in running container.
+- Begin Phase 1 of destination intelligence: YouTube and Reddit adapters, place_sources and place_media schema migrations.
+
+Next session
+- pm2 startup if not done.
+- Begin destination intelligence Phase 1.

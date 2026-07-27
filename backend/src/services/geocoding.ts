@@ -29,7 +29,9 @@ function viewportRadius(geometry: any): number {
 export async function geocodeDestination(
 	destination: string,
 ): Promise<GeoResult | null> {
-	const key = `geo:${destination.toLowerCase().trim()}`;
+	// v2: name resolution order changed (sublocalities like Canggu no longer
+	// broaden to their admin area) — new prefix invalidates old cached names
+	const key = `geo:v3:${destination.toLowerCase().trim()}`;
 
 	try {
 		const cached = await redis.get(key);
@@ -51,11 +53,23 @@ export async function geocodeDestination(
 		const countryComp = (r.address_components || []).find((c: any) =>
 			c.types.includes("country"),
 		);
-		const localityComp = (r.address_components || []).find(
-			(c: any) =>
-				c.types.includes("locality") ||
-				c.types.includes("administrative_area_level_1"),
-		);
+		// Smallest-area name first: "Canggu" must stay Canggu, not broaden to
+		// a district or admin area (which would then match nothing in the
+		// catalog). Admin levels are deliberately excluded — the fallback is
+		// the first formatted-address segment, which names what was searched.
+		const NAME_TYPES = [
+			"locality",
+			"sublocality",
+			"sublocality_level_1",
+			"neighborhood",
+		];
+		let localityComp: any = null;
+		for (const t of NAME_TYPES) {
+			localityComp = (r.address_components || []).find((c: any) =>
+				c.types.includes(t),
+			);
+			if (localityComp) break;
+		}
 
 		const result: GeoResult = {
 			name: localityComp?.long_name || r.formatted_address.split(",")[0],
