@@ -6,14 +6,16 @@ import { pool } from '../src/utils/db';
 // Stage B: the only place sub_area_id is ever written. Runs on a schedule
 // (cron, outside this process), never live/per-request. Resolves raw
 // Google addressComponents tags captured at upsert time (Stage A, in
-// searchCache.ts) into real sub_areas rows, then computes the per-category
-// coverage snapshot that gates which sub-areas are ever offered to users.
+// searchCache.ts) into real sub_areas rows, then falls back to DBSCAN
+// clustering for whatever's left untagged (Phase 2 — cities where Google's
+// own sublocality tagging is sparse, e.g. Windhoek), then computes the
+// per-category coverage snapshot that gates which sub-areas are ever
+// offered to users.
 //
-// Phase 1: source is always 'google_tag'. DBSCAN clustering (for cities
-// where Google's own tagging is sparse) and OSM boundary import are
-// deferred — the schema already supports both, so adding them later needs
-// no migration, just a new resolution path feeding the same sub_areas /
-// sub_area_coverage tables.
+// OSM boundary import (Phase 3, for precision/naming and as a third
+// candidate source) is still deferred — the schema already supports it
+// (source enum, nullable geometry column), so adding it later needs no
+// migration, just a new resolution path feeding the same tables.
 
 const CATEGORIES = ['food', 'accommodation', 'activity', 'transport'];
 
@@ -38,6 +40,20 @@ const SIMILARITY_THRESHOLD = 0.6;
 // landed 300-600m apart by centroid.
 const DUPLICATE_DISTANCE_METERS = 750;
 
+// DBSCAN fallback (Phase 2), for places Google never tagged with a
+// sublocality/neighborhood at all. eps in meters (transformed to Web
+// Mercator so distance is metric, not degrees) — walkable-district scale,
+// per the agreed design range (350-500m). minpoints avoids a single
+// restaurant becoming its own "neighborhood".
+const DBSCAN_EPS_METERS = 400;
+const DBSCAN_MIN_POINTS = 5;
+
+// A cluster only gets named from real, recognizable text — never a
+// generic "Cluster 4". Address-token harvest needs real plurality
+// agreement among members, not just whichever address happened to be
+// scanned first, or a single stray street name would name the whole area.
+const TOKEN_HARVEST_MIN_SHARE = 0.3;
+
 function normalizeSlug(rawTag: string, region: string, country: string): string {
   let s = rawTag.toLowerCase().trim();
   // Strip a trailing ", {region}" or ", {country}" suffix Google sometimes
@@ -60,6 +76,120 @@ interface UnresolvedPlace {
   raw_subregion_tag: string;
   latitude: string | null;
   longitude: string | null;
+}
+
+interface ClusterCandidate {
+  id: string;
+  address: string | null;
+  name: string;
+  review_count: number | string | null;
+  cluster_id: number | null;
+}
+
+// Never a generic "Cluster N" — only a real, recognizable name. Address-
+// token harvest first (most frequent comma-separated segment across
+// members' addresses, excluding the last two segments — usually postal
+// code/country — and the region name itself, which isn't a useful
+// sub-area name on its own). Falls back to naming after the cluster's
+// highest-review-count place ("near X") — still a real business name,
+// never invented. Reverse-geocoding a cluster centroid (a third fallback
+// the agreed design allows) is deliberately skipped for this phase — the
+// two steps here already guarantee a real name, so it isn't needed yet.
+function harvestClusterName(members: ClusterCandidate[], region: string): string | null {
+  const tokenCounts = new Map<string, number>();
+  for (const m of members) {
+    if (!m.address) continue;
+    const segments = m.address
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const candidates = segments
+      .slice(0, -2)
+      .filter((s) => s.toLowerCase() !== region.toLowerCase());
+    for (const c of candidates) {
+      tokenCounts.set(c, (tokenCounts.get(c) || 0) + 1);
+    }
+  }
+  if (tokenCounts.size > 0) {
+    const [topToken, count] = [...tokenCounts.entries()].sort((a, b) => b[1] - a[1])[0];
+    if (count >= Math.max(2, Math.ceil(members.length * TOKEN_HARVEST_MIN_SHARE))) {
+      return topToken;
+    }
+  }
+
+  const byReviews = [...members].sort(
+    (a, b) => (parseInt(b.review_count as string, 10) || 0) - (parseInt(a.review_count as string, 10) || 0),
+  );
+  return byReviews[0] ? `near ${byReviews[0].name}` : null;
+}
+
+async function runDBSCANFallback(region: string): Promise<{ resolved: number; created: number }> {
+  const { rows } = await pool.query<ClusterCandidate>(
+    `SELECT id, address, name, review_count,
+            ST_ClusterDBSCAN(
+              ST_Transform(ST_SetSRID(ST_MakePoint(longitude, latitude), 4326), 3857),
+              eps := $2, minpoints := $3
+            ) OVER () AS cluster_id
+     FROM places_cache
+     WHERE region = $1
+       AND sub_area_id IS NULL
+       AND raw_subregion_tag IS NULL
+       AND expires_at > NOW()
+       AND latitude IS NOT NULL AND longitude IS NOT NULL`,
+    [region, DBSCAN_EPS_METERS, DBSCAN_MIN_POINTS],
+  );
+
+  const clusters = new Map<number, ClusterCandidate[]>();
+  for (const row of rows) {
+    if (row.cluster_id === null) continue; // DBSCAN noise point, not a real cluster
+    if (!clusters.has(row.cluster_id)) clusters.set(row.cluster_id, []);
+    clusters.get(row.cluster_id)!.push(row);
+  }
+
+  let resolved = 0;
+  let created = 0;
+
+  for (const members of clusters.values()) {
+    const name = harvestClusterName(members, region);
+    if (!name) continue;
+    const slug = normalizeSlug(name, region, '');
+    if (!slug) continue;
+
+    // Same fuzzy-match-or-create pattern as the tag path — if this cluster
+    // lands on a name close to an already-existing sub_area (created from a
+    // Google tag on a different place), merge into it instead of
+    // duplicating the same real-world area under a second source.
+    const { rows: matches } = await pool.query(
+      `SELECT id, similarity(canonical_slug, $2) AS sim
+       FROM sub_areas WHERE region = $1 ORDER BY sim DESC LIMIT 1`,
+      [region, slug],
+    );
+
+    let subAreaId: string;
+    if (matches.length > 0 && matches[0].sim >= SIMILARITY_THRESHOLD) {
+      subAreaId = matches[0].id;
+    } else {
+      const { rows: inserted } = await pool.query(
+        `INSERT INTO sub_areas (region, canonical_name, canonical_slug, source)
+         VALUES ($1, $2, $3, 'cluster')
+         ON CONFLICT (region, canonical_slug) DO UPDATE SET updated_at = NOW()
+         RETURNING id`,
+        [region, name, slug],
+      );
+      subAreaId = inserted[0].id;
+      created++;
+    }
+
+    for (const m of members) {
+      await pool.query(`UPDATE places_cache SET sub_area_id = $1 WHERE id = $2`, [
+        subAreaId,
+        m.id,
+      ]);
+      resolved++;
+    }
+  }
+
+  return { resolved, created };
 }
 
 async function resolveRegion(region: string): Promise<{ resolved: number; created: number }> {
@@ -112,6 +242,13 @@ async function resolveRegion(region: string): Promise<{ resolved: number; create
     ]);
     resolved++;
   }
+
+  // Phase 2: DBSCAN whatever's left with no tag to resolve from at all —
+  // runs after tag resolution so it only sees places tag-matching couldn't
+  // already claim.
+  const dbscanResult = await runDBSCANFallback(region);
+  resolved += dbscanResult.resolved;
+  created += dbscanResult.created;
 
   // Recompute centroids for every sub_area in this region from their
   // currently-assigned places (cheap, region-scoped, keeps the centroid
@@ -187,7 +324,7 @@ async function logProbableDuplicates(region: string): Promise<void> {
 async function main() {
   const { rows: regions } = await pool.query(
     `SELECT DISTINCT region FROM places_cache
-     WHERE raw_subregion_tag IS NOT NULL AND sub_area_id IS NULL AND expires_at > NOW()
+     WHERE sub_area_id IS NULL AND expires_at > NOW()
      UNION
      SELECT DISTINCT region FROM sub_areas`,
   );
