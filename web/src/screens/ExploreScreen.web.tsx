@@ -240,6 +240,12 @@ export default function ExploreScreen({
 	const [subregions, setSubregions] = useState<
 		{ name: string; slug: string; count: number }[]
 	>([]);
+	// Category-sectioned homepage rows (Top Food / Top Stays / ...), shown
+	// only in the default "All categories, no local filter" view -- once a
+	// category is picked or the user types a local filter, today's single
+	// flat grid takes over unchanged.
+	const [sections, setSections] = useState<Record<string, any[]>>({});
+	const [sectionsLoading, setSectionsLoading] = useState(false);
 	const [destInput, setDestInput] = useState("");
 	const [recent, setRecent] = useState<string[]>(loadRecent);
 	const [search, setSearch] = useState("");
@@ -301,6 +307,34 @@ export default function ExploreScreen({
 	useEffect(() => {
 		fetchResults();
 	}, [fetchResults]);
+
+	// Sectioned homepage rows -- only fetched (and only shown) when there's
+	// no category filter and no local text filter active. A handful of
+	// small per-category requests, not a rewrite of the main fetch path.
+	const SECTION_CATEGORIES = ["food", "accommodation", "activity", "transport"];
+	useEffect(() => {
+		if (category || search) return;
+		let cancelled = false;
+		setSectionsLoading(true);
+		Promise.all(
+			SECTION_CATEGORIES.map((cat) => {
+				const params: any = { category: cat, limit: 8 };
+				if (region) params.region = region;
+				if (subArea) params.sub_area = subArea;
+				return api
+					.get("/recommendations", { params })
+					.then((res: any) => [cat, res.data.results || []])
+					.catch(() => [cat, []]);
+			}),
+		).then((entries) => {
+			if (cancelled) return;
+			setSections(Object.fromEntries(entries));
+			setSectionsLoading(false);
+		});
+		return () => {
+			cancelled = true;
+		};
+	}, [category, search, region, subArea]);
 
 	// Point the screen at any destination on earth: warm the catalog (backend
 	// geocodes and fans out to live sources if it's new), learn the canonical
@@ -554,30 +588,81 @@ export default function ExploreScreen({
 				)}
 			</div>
 
-			{loading ? (
+			{category || search ? (
+				loading ? (
+					<div style={styles.loading}>
+						{region
+							? `Finding the best of ${region} for you...`
+							: "Finding places for you..."}
+					</div>
+				) : filtered.length === 0 ? (
+					<div style={styles.empty}>
+						{region
+							? `Nothing found in ${region} yet. Try a different category, or search another destination.`
+							: "Nothing found. Search a destination above to start exploring."}
+					</div>
+				) : (
+					<div style={styles.grid}>
+						{filtered.map((item) => (
+							<ResultCard
+								key={`${item.type}-${item.id}`}
+								item={item}
+								personalized={personalized}
+								onSave={handleSave}
+								saved={saves.has(item.id)}
+								onView={handleView}
+							/>
+						))}
+					</div>
+				)
+			) : sectionsLoading ? (
 				<div style={styles.loading}>
 					{region
 						? `Finding the best of ${region} for you...`
 						: "Finding places for you..."}
 				</div>
-			) : filtered.length === 0 ? (
+			) : SECTION_CATEGORIES.every((c) => (sections[c] || []).length === 0) ? (
 				<div style={styles.empty}>
 					{region
 						? `Nothing found in ${region} yet. Try a different category, or search another destination.`
 						: "Nothing found. Search a destination above to start exploring."}
 				</div>
 			) : (
-				<div style={styles.grid}>
-					{filtered.map((item) => (
-						<ResultCard
-							key={`${item.type}-${item.id}`}
-							item={item}
-							personalized={personalized}
-							onSave={handleSave}
-							saved={saves.has(item.id)}
-							onView={handleView}
-						/>
-					))}
+				<div style={styles.sectionsContainer}>
+					{SECTION_CATEGORIES.map((cat) => {
+						const items = sections[cat] || [];
+						if (items.length === 0) return null;
+						const label = CATEGORIES.find((c) => c.key === cat)?.label || cat;
+						return (
+							<div key={cat} style={styles.sectionBlock}>
+								<div style={styles.sectionHeader}>
+									<h3 style={styles.sectionTitle}>{label}</h3>
+									<button
+										style={styles.seeAllBtn}
+										onClick={() => setCategory(cat)}
+									>
+										See all →
+									</button>
+								</div>
+								<div style={styles.sectionScroll}>
+									{items.map((item) => (
+										<div
+											key={`${item.type}-${item.id}`}
+											style={styles.sectionCard}
+										>
+											<ResultCard
+												item={item}
+												personalized={personalized}
+												onSave={handleSave}
+												saved={saves.has(item.id)}
+												onView={handleView}
+											/>
+										</div>
+									))}
+								</div>
+							</div>
+						);
+					})}
 				</div>
 			)}
 		</div>
@@ -715,6 +800,45 @@ const styles: Record<string, React.CSSProperties> = {
 		gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
 		gap: 16,
 		padding: 20,
+	},
+
+	sectionsContainer: {
+		padding: "20px 0",
+	},
+	sectionBlock: {
+		marginBottom: 28,
+	},
+	sectionHeader: {
+		display: "flex",
+		alignItems: "center",
+		justifyContent: "space-between",
+		padding: "0 20px",
+		marginBottom: 12,
+	},
+	sectionTitle: {
+		fontSize: 18,
+		fontWeight: 700,
+		margin: 0,
+		color: "#1a1a1a",
+	},
+	seeAllBtn: {
+		background: "none",
+		border: "none",
+		color: "#0a7d55",
+		fontWeight: 600,
+		fontSize: 14,
+		cursor: "pointer",
+		padding: 0,
+	},
+	sectionScroll: {
+		display: "flex",
+		gap: 16,
+		overflowX: "auto" as const,
+		padding: "0 20px 4px",
+	},
+	sectionCard: {
+		flex: "0 0 260px",
+		width: 260,
 	},
 
 	card: {
