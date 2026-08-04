@@ -505,23 +505,25 @@ export default function ExploreScreen({
 						</div>
 					)}
 
-					{/* Recent + suggested destinations */}
-					<div style={styles.regionPills}>
-						{quickPicks.map((r) => (
-							<button
-								key={r}
-								style={{
-									...styles.destPill,
-									...(region === r ? styles.destPillActive : {}),
-								}}
-								onClick={() =>
-									region === r ? clearDestination() : exploreDestination(r)
-								}
-							>
-								{r}
-							</button>
-						))}
-					</div>
+					{/* Recent + suggested destinations — only on the unscoped "For
+					    you" landing view. Once a specific city is being explored,
+					    this used to show unrelated global suggestions (e.g.
+					    "Milan" mixed with hardcoded "Canggu, Ubud..."); the
+					    sub-area chips below already cover "what else to explore"
+					    once a destination is picked. */}
+					{!region && (
+						<div style={styles.regionPills}>
+							{quickPicks.map((r) => (
+								<button
+									key={r}
+									style={styles.destPill}
+									onClick={() => exploreDestination(r)}
+								>
+									{r}
+								</button>
+							))}
+						</div>
+					)}
 				</div>
 
 				{/* Filter within results */}

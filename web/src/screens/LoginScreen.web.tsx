@@ -94,7 +94,7 @@ export default function LoginScreen() {
   if (mode === 'landing') {
     return (
       <LandingScreen
-        onJoin={() => setMode('waitlist')}
+        onJoin={() => setMode('register')}
         onLogin={() => setMode('login')}
       />
     );
@@ -179,11 +179,8 @@ export default function LoginScreen() {
             </div>
           )}
 
-          {!inviteToken && (
-            <div style={s.warningBanner}>
-              Drift is currently invite-only. If you have an invite link, open it from the email or message you received.
-            </div>
-          )}
+          {/* Open signup — invite banner above still greets invited users;
+              no blocking message for everyone else. */}
 
           {error && <div style={s.error}>{error}</div>}
 
@@ -203,24 +200,20 @@ export default function LoginScreen() {
               placeholder="Min 8 characters" />
           </div>
 
-          {inviteToken && (
-            <div style={s.field}>
-              <label style={s.label}>I am a</label>
-              <div style={s.roleRow}>
-                <button style={{ ...s.roleBtn, ...(role === 'traveler' ? s.roleBtnActive : {}) }}
-                  onClick={() => setRole('traveler')}>Traveller</button>
-                <button style={{ ...s.roleBtn, ...(role === 'operator' ? s.roleBtnActive : {}) }}
-                  onClick={() => setRole('operator')}>Operator</button>
-              </div>
+          <div style={s.field}>
+            <label style={s.label}>I am a</label>
+            <div style={s.roleRow}>
+              <button style={{ ...s.roleBtn, ...(role === 'traveler' ? s.roleBtnActive : {}) }}
+                onClick={() => setRole('traveler')}>Traveller</button>
+              <button style={{ ...s.roleBtn, ...(role === 'operator' ? s.roleBtnActive : {}) }}
+                onClick={() => setRole('operator')}>Operator</button>
             </div>
-          )}
+          </div>
 
-          {inviteToken && (
-            <button style={{ ...s.submit, opacity: loading ? 0.7 : 1 }}
-              onClick={handleRegister} disabled={loading}>
-              {loading ? 'Creating account...' : 'Create account'}
-            </button>
-          )}
+          <button style={{ ...s.submit, opacity: loading ? 0.7 : 1 }}
+            onClick={handleRegister} disabled={loading}>
+            {loading ? 'Creating account...' : 'Create account'}
+          </button>
 
           <p style={s.fine}>Already a member?{' '}
             <button style={s.link} onClick={() => setMode('login')}>Sign in</button>

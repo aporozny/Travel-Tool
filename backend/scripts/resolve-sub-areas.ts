@@ -2,6 +2,8 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 import { pool } from '../src/utils/db';
+import { redis } from '../src/utils/redis';
+import { reverseGeocodeNeighborhoodName } from '../src/services/neighborhoodLookup';
 
 // Stage B: the only place sub_area_id is ever written. Runs on a schedule
 // (cron, outside this process), never live/per-request. Resolves raw
@@ -83,19 +85,34 @@ interface ClusterCandidate {
   address: string | null;
   name: string;
   review_count: number | string | null;
+  latitude: string | null;
+  longitude: string | null;
   cluster_id: number | null;
 }
 
-// Never a generic "Cluster N" — only a real, recognizable name. Address-
-// token harvest first (most frequent comma-separated segment across
-// members' addresses, excluding the last two segments — usually postal
-// code/country — and the region name itself, which isn't a useful
-// sub-area name on its own). Falls back to naming after the cluster's
-// highest-review-count place ("near X") — still a real business name,
-// never invented. Reverse-geocoding a cluster centroid (a third fallback
-// the agreed design allows) is deliberately skipped for this phase — the
-// two steps here already guarantee a real name, so it isn't needed yet.
-function harvestClusterName(members: ClusterCandidate[], region: string): string | null {
+// Never a generic "Cluster N" — only a real, recognizable name. Three
+// tiers, reverse-geocode FIRST: (1) reverse-geocode the cluster centroid
+// (Google Geocoding first — same account already paid for, verified live
+// against Singapore data returning "Bishan" — then OpenStreetMap/
+// Nominatim as an independent second source); structurally typed as a
+// real neighborhood, so it's tried before the heuristic tiers below.
+// (2) address-token harvest (most frequent comma-separated segment across
+// members' addresses) as a fallback when reverse-geocoding fails —
+// token-harvest cannot tell a street address from a neighborhood name
+// (a cluster near "22 Sin Ming Ln" harvested that street segment as its
+// "name" before this reorder, even though reverse-geocoding the same
+// centroid correctly returns "Bishan"), so it must not run first.
+// (3) name after the cluster's highest-review-count place ("near X") as
+// the absolute last resort — still a real business name, never invented.
+async function harvestClusterName(
+  members: ClusterCandidate[],
+  region: string,
+  centroidLat: number,
+  centroidLng: number,
+): Promise<string | null> {
+  const reverseGeocoded = await reverseGeocodeNeighborhoodName(centroidLat, centroidLng);
+  if (reverseGeocoded) return reverseGeocoded;
+
   const tokenCounts = new Map<string, number>();
   for (const m of members) {
     if (!m.address) continue;
@@ -125,7 +142,7 @@ function harvestClusterName(members: ClusterCandidate[], region: string): string
 
 async function runDBSCANFallback(region: string): Promise<{ resolved: number; created: number }> {
   const { rows } = await pool.query<ClusterCandidate>(
-    `SELECT id, address, name, review_count,
+    `SELECT id, address, name, review_count, latitude, longitude,
             ST_ClusterDBSCAN(
               ST_Transform(ST_SetSRID(ST_MakePoint(longitude, latitude), 4326), 3857),
               eps := $2, minpoints := $3
@@ -150,7 +167,11 @@ async function runDBSCANFallback(region: string): Promise<{ resolved: number; cr
   let created = 0;
 
   for (const members of clusters.values()) {
-    const name = harvestClusterName(members, region);
+    const centroidLat =
+      members.reduce((sum, m) => sum + parseFloat(m.latitude || "0"), 0) / members.length;
+    const centroidLng =
+      members.reduce((sum, m) => sum + parseFloat(m.longitude || "0"), 0) / members.length;
+    const name = await harvestClusterName(members, region, centroidLat, centroidLng);
     if (!name) continue;
     const slug = normalizeSlug(name, region, '');
     if (!slug) continue;
@@ -343,6 +364,11 @@ async function main() {
   }
   console.log(`Done. ${totalResolved} places resolved, ${totalCreated} sub-areas created.`);
   await pool.end();
+  // ioredis keeps a persistent auto-reconnecting connection open — without
+  // this the process never exits after finishing (found accumulating
+  // hung hourly-cron processes on the VPS: every run since this script
+  // started importing redis logged "Done" but never terminated).
+  redis.disconnect();
 }
 
 main().catch((err) => {
