@@ -9,14 +9,17 @@ export const recommendationsRouter = Router();
 // Personalized if authenticated, anonymous ranking if not
 recommendationsRouter.get('/', optionalAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { category, region, limit, refresh, sub_area } = req.query;
+    const { category, region, limit, offset, refresh, sub_area } = req.query;
+    const parsedLimit = Math.min(parseInt(limit as string) || 20, 50);
+    const parsedOffset = Math.max(parseInt(offset as string) || 0, 0);
 
-    const results = await getRecommendations(
+    const { results, total } = await getRecommendations(
       req.user?.id || null,
       {
         category: category as string,
         region: region as string,
-        limit: Math.min(parseInt(limit as string) || 20, 50),
+        limit: parsedLimit,
+        offset: parsedOffset,
         forceRefresh: refresh === 'true',
         subArea: sub_area as string,
       }
@@ -24,7 +27,8 @@ recommendationsRouter.get('/', optionalAuth, async (req: AuthenticatedRequest, r
 
     return res.json({
       results,
-      total: results.length,
+      total,
+      hasMore: parsedOffset + results.length < total,
       personalized: !!req.user,
     });
   } catch (err) {

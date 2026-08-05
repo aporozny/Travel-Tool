@@ -495,17 +495,23 @@ async function getMemberPreferences(
 }
 
 // Main recommendation function
+export interface RecommendationPage {
+	results: RecommendationResult[];
+	total: number; // size of the full scored candidate pool, for hasMore
+}
+
 export async function getRecommendations(
 	userId: string | null,
 	options: {
 		category?: string;
 		region?: string;
 		limit?: number;
+		offset?: number;
 		forceRefresh?: boolean;
 		subArea?: string;
 	} = {},
-): Promise<RecommendationResult[]> {
-	const { category, region, limit = 20, forceRefresh = false, subArea } = options;
+): Promise<RecommendationPage> {
+	const { category, region, limit = 20, offset = 0, forceRefresh = false, subArea } = options;
 
 	// Sub-area is a places_cache-only concept (operators aren't assigned one),
 	// resolved the same way search() resolves it: by slug against the
@@ -521,15 +527,19 @@ export async function getRecommendations(
 		subAreaId = rows[0]?.id;
 	}
 
-	// Check recommendation cache for authenticated users
+	// Check recommendation cache for authenticated users. Cached value is
+	// the full scored candidate pool (pre-pagination) so paging through a
+	// category with "load more" doesn't repeat the DB fetch + scoring.
+	const cacheKey = `rec:${userId}:${category || "all"}:${region || "all"}:${subArea || "all"}`;
+	let scored: RecommendationResult[] | null = null;
 	if (userId && !forceRefresh) {
-		const cacheKey = `rec:${userId}:${category || "all"}:${region || "all"}:${subArea || "all"}`;
 		const cached = await redis.get(cacheKey);
 		if (cached) {
-			return JSON.parse(cached).slice(0, limit);
+			scored = JSON.parse(cached);
 		}
 	}
 
+	if (!scored) {
 	// Fetch operators from DB
 	let opQuery = `
     SELECT o.id, 'operator' AS type, o.business_name AS name, o.category,
@@ -653,7 +663,7 @@ export async function getRecommendations(
 		};
 	};
 
-	const scored: RecommendationResult[] = allItems
+	scored = allItems
 		.map((item) => {
 			if (prefs) {
 				// Personalized scoring (full or partial preferences)
@@ -677,19 +687,23 @@ export async function getRecommendations(
 		})
 		.sort((a, b) => b.score - a.score);
 
-	// Category-filtered requests keep pure score order; mixed requests get
-	// category diversity (WP4.1).
-	const results = category
-		? scored.slice(0, limit)
-		: interleaveByCategory(scored, limit);
-
-	// Cache results for 1 hour for authenticated users
+	// Cache the full scored pool (not a pre-sliced page) for 1 hour for
+	// authenticated users, so subsequent "load more" pages reuse it.
 	if (userId) {
-		const cacheKey = `rec:${userId}:${category || "all"}:${region || "all"}`;
-		await redis.setex(cacheKey, 3600, JSON.stringify(results));
+		await redis.setex(cacheKey, 3600, JSON.stringify(scored));
+	}
 	}
 
-	return results;
+	// Category-filtered requests keep pure score order and support paging
+	// via offset ("load more" within a category, e.g. Accommodation or
+	// Food). Mixed requests get category diversity (WP4.1) and are not
+	// paginated -- ExploreScreen only browses one category at a time past
+	// the first page.
+	const results = category
+		? scored.slice(offset, offset + limit)
+		: interleaveByCategory(scored, limit);
+
+	return { results, total: scored.length };
 }
 
 // Track member interaction for future recommendation improvement

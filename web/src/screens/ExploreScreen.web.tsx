@@ -233,6 +233,8 @@ export default function ExploreScreen({
 }: any) {
 	const [results, setResults] = useState<any[]>([]);
 	const [loading, setLoading] = useState(true);
+	const [hasMore, setHasMore] = useState(false);
+	const [loadingMore, setLoadingMore] = useState(false);
 	const [personalized, setPersonalized] = useState(false);
 	const [category, setCategory] = useState("");
 	const [region, setRegion] = useState("");
@@ -275,10 +277,12 @@ export default function ExploreScreen({
 			.catch(() => setSubregions([]));
 	}, [region]);
 
+	const RESULTS_PAGE_SIZE = 20;
+
 	const fetchResults = useCallback(async () => {
 		setLoading(true);
 		try {
-			const params: any = { limit: 40 };
+			const params: any = { limit: RESULTS_PAGE_SIZE };
 			if (category) params.category = category;
 			if (region) params.region = region;
 			if (subArea) params.sub_area = subArea;
@@ -290,6 +294,7 @@ export default function ExploreScreen({
 			const res = await api.get("/recommendations", { params });
 			setResults(res.data.results || []);
 			setPersonalized(res.data.personalized || false);
+			setHasMore(!!res.data.hasMore);
 		} catch {
 			try {
 				const res = await api.get("/operators", {
@@ -298,6 +303,7 @@ export default function ExploreScreen({
 				setResults(
 					res.data.map((o: any) => ({ ...o, type: "operator", score: 0 })),
 				);
+				setHasMore(false);
 			} catch {}
 		} finally {
 			setLoading(false);
@@ -307,6 +313,32 @@ export default function ExploreScreen({
 	useEffect(() => {
 		fetchResults();
 	}, [fetchResults]);
+
+	// "Load more" within a single category (e.g. scroll through more Food
+	// or Accommodation options to save) -- offset is simply how many
+	// results are already loaded, since the backend caches the full
+	// scored candidate pool and just slices it per page.
+	const loadMore = async () => {
+		if (loadingMore || !hasMore) return;
+		setLoadingMore(true);
+		try {
+			const params: any = {
+				limit: RESULTS_PAGE_SIZE,
+				offset: results.length,
+			};
+			if (category) params.category = category;
+			if (region) params.region = region;
+			if (subArea) params.sub_area = subArea;
+
+			const res = await api.get("/recommendations", { params });
+			setResults((prev) => [...prev, ...(res.data.results || [])]);
+			setHasMore(!!res.data.hasMore);
+		} catch {
+			setHasMore(false);
+		} finally {
+			setLoadingMore(false);
+		}
+	};
 
 	// Sectioned homepage rows -- only fetched (and only shown) when there's
 	// no category filter and no local text filter active. A handful of
@@ -604,18 +636,34 @@ export default function ExploreScreen({
 							: "Nothing found. Search a destination above to start exploring."}
 					</div>
 				) : (
-					<div style={styles.grid}>
-						{filtered.map((item) => (
-							<ResultCard
-								key={`${item.type}-${item.id}`}
-								item={item}
-								personalized={personalized}
-								onSave={handleSave}
-								saved={saves.has(item.id)}
-								onView={handleView}
-							/>
-						))}
-					</div>
+					<>
+						<div style={styles.grid}>
+							{filtered.map((item) => (
+								<ResultCard
+									key={`${item.type}-${item.id}`}
+									item={item}
+									personalized={personalized}
+									onSave={handleSave}
+									saved={saves.has(item.id)}
+									onView={handleView}
+								/>
+							))}
+						</div>
+						{/* Load more within this category -- a real visible button
+						    (not scroll-triggered-only) so it works for keyboard/
+						    screen-reader users too, per the agreed design. Only
+						    shown for a single-category view: the backend caches
+						    the full scored pool per category, not per mixed page. */}
+						{category && hasMore && !search && (
+							<button
+								style={styles.loadMoreBtn}
+								onClick={loadMore}
+								disabled={loadingMore}
+							>
+								{loadingMore ? "Loading more..." : "Load more"}
+							</button>
+						)}
+					</>
 				)
 			) : sectionsLoading ? (
 				<div style={styles.loading}>
@@ -831,6 +879,18 @@ const styles: Record<string, React.CSSProperties> = {
 		fontSize: 14,
 		cursor: "pointer",
 		padding: 0,
+	},
+	loadMoreBtn: {
+		display: "block",
+		margin: "24px auto",
+		padding: "12px 28px",
+		borderRadius: 12,
+		border: "1px solid #C9A84C",
+		background: "#fff",
+		color: "#C9A84C",
+		fontSize: 15,
+		fontWeight: 600,
+		cursor: "pointer",
 	},
 	sectionScroll: {
 		display: "flex",
