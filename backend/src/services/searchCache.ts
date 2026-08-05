@@ -280,7 +280,7 @@ async function queryCatalog(
 // category, but transport dominated 13/20 of what was actually shown).
 // Query each category separately and interleave so the page reflects the
 // catalog's real diversity.
-async function getCatalogResults(
+export async function getCatalogResults(
 	query: string,
 	geo: ResolvedGeo,
 	category?: string,
@@ -333,6 +333,36 @@ export async function getSubregions(
 	}));
 }
 
+export interface LiveTopUpPlan {
+	thinCategories: string[];
+	willCallViator: boolean;
+	willCallFoursquare: boolean;
+	totalCalls: number;
+}
+
+// Pure planning step, split out from search() for testability: given
+// per-category coverage counts and whether Viator/Foursquare are usable
+// for this destination, decides which categories need a live top-up and
+// how many outbound calls that will cost (reserveFetchBudget needs the
+// real count, not a flat 1 -- see FETCH_DAILY_BUDGET comment above).
+export function planLiveTopUp(
+	coverageByCategory: { cat: string; coverage: number }[],
+	viatorAvailable: boolean,
+	foursquareAvailable: boolean,
+): LiveTopUpPlan {
+	const thinCategories = coverageByCategory
+		.filter((c) => c.coverage < MIN_COVERAGE)
+		.map((c) => c.cat);
+
+	const wantTours = thinCategories.includes("activity");
+	const willCallViator = wantTours && viatorAvailable;
+	const willCallFoursquare = thinCategories.length > 0 && foursquareAvailable;
+	const totalCalls =
+		thinCategories.length + (willCallViator ? 1 : 0) + (willCallFoursquare ? 1 : 0);
+
+	return { thinCategories, willCallViator, willCallFoursquare, totalCalls };
+}
+
 export async function search(
 	query: string,
 	region: string,
@@ -377,18 +407,12 @@ export async function search(
 				coverage: await coverageCount(geo, cat),
 			})),
 		);
-		const thinCategories = coverageByCategory
-			.filter((c) => c.coverage < MIN_COVERAGE)
-			.map((c) => c.cat);
-
-		const wantTours = thinCategories.includes("activity");
-		const willCallViator = wantTours && viatorEnabled() && !!geo.point;
-		const willCallFoursquare =
-			thinCategories.length > 0 && foursquareEnabled() && !!geo.point;
-		const totalCalls =
-			thinCategories.length +
-			(willCallViator ? 1 : 0) +
-			(willCallFoursquare ? 1 : 0);
+		const { thinCategories, willCallViator, willCallFoursquare, totalCalls } =
+			planLiveTopUp(
+				coverageByCategory,
+				viatorEnabled() && !!geo.point,
+				foursquareEnabled() && !!geo.point,
+			);
 
 		if (totalCalls > 0 && (await reserveFetchBudget(totalCalls))) {
 			const [googleSettled, viator, foursquare] = await Promise.allSettled([
