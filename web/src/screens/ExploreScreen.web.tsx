@@ -40,12 +40,19 @@ function ScoreBadge({
 	);
 }
 
+// A lone "1 saved" reads worse than no count at all -- people anchor on
+// the smallness specifically. Only show real social proof once it's
+// actually substantial; a low/zero count renders nothing rather than a
+// hollow-looking number.
+const SOCIAL_PROOF_MIN = 5;
+
 function CommunityRow({
 	community,
 }: {
 	community?: { saves: number; books: number };
 }) {
-	if (!community || (!community.saves && !community.books)) return null;
+	if (!community) return null;
+	if (community.saves + community.books < SOCIAL_PROOF_MIN) return null;
 	return (
 		<div style={styles.communityRow}>
 			{community.saves > 0 && <span>♥ {community.saves} saved</span>}
@@ -101,9 +108,9 @@ function ResultCard({ item, personalized, onSave, saved, onView }: any) {
 					{item.is_claimed && !item.is_verified && (
 						<span style={styles.claimedBadge}>Claimed</span>
 					)}
-					{!item.operator_id && (
-						<span style={styles.unclaimedBadge}>Unclaimed</span>
-					)}
+					{/* No negative "Unclaimed" label: unclaimed is the majority of
+					    the catalog and often just as good -- absence of a badge
+					    reads as neutral, a warning label would not. */}
 				</div>
 				<h3 style={styles.cardName}>{item.name}</h3>
 				<p style={styles.cardRegion}>{item.region}</p>
