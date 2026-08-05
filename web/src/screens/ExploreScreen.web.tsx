@@ -53,10 +53,17 @@ function CommunityRow({
 }) {
 	if (!community) return null;
 	if (community.saves + community.books < SOCIAL_PROOF_MIN) return null;
+	const parts = [];
+	if (community.saves > 0) parts.push(`${community.saves} people saved this`);
+	if (community.books > 0) parts.push(`${community.books} booked`);
 	return (
-		<div style={styles.communityRow}>
-			{community.saves > 0 && <span>♥ {community.saves} saved</span>}
-			{community.books > 0 && <span>✓ {community.books} booked</span>}
+		<div style={styles.communityRow} aria-label={parts.join(", ")}>
+			{community.saves > 0 && (
+				<span aria-hidden="true">♥ {community.saves} saved</span>
+			)}
+			{community.books > 0 && (
+				<span aria-hidden="true">✓ {community.books} booked</span>
+			)}
 		</div>
 	);
 }
@@ -66,7 +73,19 @@ function ResultCard({ item, personalized, onSave, saved, onView }: any) {
 	const score = Math.round((item.score / 100) * 100);
 
 	return (
-		<div style={styles.card} onClick={() => onView(item)}>
+		<div
+			style={styles.card}
+			onClick={() => onView(item)}
+			role="button"
+			tabIndex={0}
+			aria-label={`View details for ${item.name}`}
+			onKeyDown={(e: React.KeyboardEvent) => {
+				if (e.key === "Enter" || e.key === " ") {
+					e.preventDefault();
+					onView(item);
+				}
+			}}
+		>
 			<div style={styles.cardPhoto}>
 				{photo ? (
 					<img
@@ -89,8 +108,10 @@ function ResultCard({ item, personalized, onSave, saved, onView }: any) {
 						e.stopPropagation();
 						onSave(item);
 					}}
+					aria-label={saved ? `Unsave ${item.name}` : `Save ${item.name}`}
+					aria-pressed={saved}
 				>
-					{saved ? "♥" : "♡"}
+					<span aria-hidden="true">{saved ? "♥" : "♡"}</span>
 				</button>
 			</div>
 			<div style={styles.cardBody}>
@@ -115,12 +136,15 @@ function ResultCard({ item, personalized, onSave, saved, onView }: any) {
 				<h3 style={styles.cardName}>{item.name}</h3>
 				<p style={styles.cardRegion}>{item.region}</p>
 				{item.rating > 0 && (
-					<div style={styles.cardRating}>
-						<span style={styles.stars}>★</span>
-						<span style={styles.ratingNum}>
+					<div
+						style={styles.cardRating}
+						aria-label={`${parseFloat(item.rating).toFixed(1)} out of 5 stars, ${item.review_count?.toLocaleString() || 0} reviews`}
+					>
+						<span style={styles.stars} aria-hidden="true">★</span>
+						<span style={styles.ratingNum} aria-hidden="true">
 							{parseFloat(item.rating).toFixed(1)}
 						</span>
-						<span style={styles.reviewCount}>
+						<span style={styles.reviewCount} aria-hidden="true">
 							({item.review_count?.toLocaleString()})
 						</span>
 					</div>
@@ -575,8 +599,9 @@ export default function ExploreScreen({
 					/>
 				</div>
 
-				{/* Category filters */}
-				<div style={styles.filterRow}>
+				{/* Category filters -- a toggle-button group, not tabs: these
+				    compose with sub-area filters rather than switching panels. */}
+				<div style={styles.filterRow} role="group" aria-label="Filter by category">
 					<div style={styles.filterScroll}>
 						{CATEGORIES.map((c) => (
 							<button
@@ -585,6 +610,7 @@ export default function ExploreScreen({
 									...styles.filterChip,
 									...(category === c.key ? styles.filterChipActive : {}),
 								}}
+								aria-pressed={category === c.key}
 								onClick={() => setCategory(c.key)}
 							>
 								{c.label}
@@ -597,13 +623,14 @@ export default function ExploreScreen({
 				    destination actually has more than one worth offering. A
 				    single-town destination looks identical to today. */}
 				{subregions.length >= 2 && (
-					<div style={styles.filterRow}>
+					<div style={styles.filterRow} role="group" aria-label="Filter by sub-area">
 						<div style={styles.filterScroll}>
 							<button
 								style={{
 									...styles.filterChip,
 									...(subArea === "" ? styles.filterChipActive : {}),
 								}}
+								aria-pressed={subArea === ""}
 								onClick={() => setSubArea("")}
 							>
 								All {region}
@@ -615,6 +642,7 @@ export default function ExploreScreen({
 										...styles.filterChip,
 										...(subArea === s.slug ? styles.filterChipActive : {}),
 									}}
+									aria-pressed={subArea === s.slug}
 									onClick={() => setSubArea(subArea === s.slug ? "" : s.slug)}
 								>
 									{s.name}
