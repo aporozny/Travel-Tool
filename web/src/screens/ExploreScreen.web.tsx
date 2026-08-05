@@ -68,6 +68,28 @@ function CommunityRow({
 	);
 }
 
+// Same card frame across every category, but this one line adapts to
+// show what's actually meaningful per category -- primary tag (from
+// Google's own classification, e.g. "italian restaurant" for food,
+// "hotel" for accommodation) plus price level where Drift actually has
+// it. Deliberately does NOT invent fields the data doesn't have (Google
+// Places opening_hours/duration/mode are not populated today) -- this is
+// the honest version of the adaptive-metadata-row design, not the full
+// vision, which would need real data for those fields first.
+function CardMetaRow({ item }: { item: any }) {
+	const primaryTag = item.tags?.[0]?.replace(/_/g, " ");
+	const priceLevel =
+		item.price_level > 0 ? "$".repeat(Math.min(item.price_level, 4)) : null;
+	if (!primaryTag && !priceLevel) return null;
+	return (
+		<p style={styles.cardMeta}>
+			{primaryTag}
+			{primaryTag && priceLevel ? " · " : ""}
+			{priceLevel}
+		</p>
+	);
+}
+
 function ResultCard({ item, personalized, onSave, saved, onView }: any) {
 	const photo = item.photos?.[0] ? PhotoUrl(item.photos[0]) : null;
 	const score = Math.round((item.score / 100) * 100);
@@ -135,6 +157,7 @@ function ResultCard({ item, personalized, onSave, saved, onView }: any) {
 				</div>
 				<h3 style={styles.cardName}>{item.name}</h3>
 				<p style={styles.cardRegion}>{item.region}</p>
+				<CardMetaRow item={item} />
 				{item.rating > 0 && (
 					<div
 						style={styles.cardRating}
@@ -156,9 +179,9 @@ function ResultCard({ item, personalized, onSave, saved, onView }: any) {
 						{item.description.length > 100 ? "..." : ""}
 					</p>
 				)}
-				{item.tags?.length > 0 && (
+				{item.tags?.length > 1 && (
 					<div style={styles.tagRow}>
-						{item.tags.slice(0, 3).map((t: string) => (
+						{item.tags.slice(1, 4).map((t: string) => (
 							<span key={t} style={styles.tag}>
 								{t.replace(/_/g, " ")}
 							</span>
@@ -266,6 +289,9 @@ export default function ExploreScreen({
 	const [loading, setLoading] = useState(true);
 	const [hasMore, setHasMore] = useState(false);
 	const [loadingMore, setLoadingMore] = useState(false);
+	// Visually-hidden aria-live announcement so screen-reader users learn
+	// when async results/load-more finish, without moving focus.
+	const [announcement, setAnnouncement] = useState("");
 	const [personalized, setPersonalized] = useState(false);
 	const [category, setCategory] = useState("");
 	const [region, setRegion] = useState("");
@@ -323,9 +349,16 @@ export default function ExploreScreen({
 			}
 
 			const res = await api.get("/recommendations", { params });
-			setResults(res.data.results || []);
+			const items = res.data.results || [];
+			setResults(items);
 			setPersonalized(res.data.personalized || false);
 			setHasMore(!!res.data.hasMore);
+			const catLabel = CATEGORIES.find((c) => c.key === category)?.label;
+			setAnnouncement(
+				`${items.length} result${items.length === 1 ? "" : "s"}` +
+					(catLabel && category ? ` for ${catLabel}` : "") +
+					(region ? ` in ${region}` : ""),
+			);
 		} catch {
 			try {
 				const res = await api.get("/operators", {
@@ -362,8 +395,12 @@ export default function ExploreScreen({
 			if (subArea) params.sub_area = subArea;
 
 			const res = await api.get("/recommendations", { params });
-			setResults((prev) => [...prev, ...(res.data.results || [])]);
+			const newItems = res.data.results || [];
+			setResults((prev) => [...prev, ...newItems]);
 			setHasMore(!!res.data.hasMore);
+			setAnnouncement(
+				`${newItems.length} more result${newItems.length === 1 ? "" : "s"} loaded, ${results.length + newItems.length} total`,
+			);
 		} catch {
 			setHasMore(false);
 		} finally {
@@ -655,6 +692,13 @@ export default function ExploreScreen({
 				{personalized && (
 					<p style={styles.personalizedNote}>✦ Ranked by your preferences</p>
 				)}
+			</div>
+
+			{/* Visually hidden -- announces async result/load-more updates to
+			    screen readers without moving focus (a sibling of the results
+			    list, not inside it, so it's not re-announced on every re-render). */}
+			<div aria-live="polite" style={styles.srOnly}>
+				{announcement}
 			</div>
 
 			{category || search ? (
@@ -1040,6 +1084,24 @@ const styles: Record<string, React.CSSProperties> = {
 		marginBottom: 2,
 	},
 	cardRegion: { fontSize: 12, color: "#999", marginBottom: 6 },
+	cardMeta: {
+		fontSize: 13,
+		color: "#555",
+		fontWeight: 600,
+		margin: "0 0 6px",
+		textTransform: "capitalize" as const,
+	},
+	srOnly: {
+		position: "absolute" as const,
+		width: 1,
+		height: 1,
+		padding: 0,
+		margin: -1,
+		overflow: "hidden" as const,
+		clip: "rect(0, 0, 0, 0)",
+		whiteSpace: "nowrap" as const,
+		border: 0,
+	},
 	cardRating: {
 		display: "flex",
 		alignItems: "center",
