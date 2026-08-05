@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { v4 as uuidv4 } from 'uuid';
 import { pool } from '../utils/db';
 import { redis } from '../utils/redis';
+import { registerRateLimit } from '../middleware/rateLimit';
 
 export const authRouter = Router();
 
@@ -47,7 +48,7 @@ function generateTokens(userId: string, email: string, role: string) {
 }
 
 // POST /api/v1/auth/register
-authRouter.post('/register', async (req: Request, res: Response) => {
+authRouter.post('/register', registerRateLimit, async (req: Request, res: Response) => {
   const client = await pool.connect();
   try {
     const body = registerSchema.parse(req.body);

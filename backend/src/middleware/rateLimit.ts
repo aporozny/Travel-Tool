@@ -10,6 +10,20 @@ export const authRateLimit = rateLimit({
   skipSuccessfulRequests: true, // only count failures
 });
 
+// Registration specifically: authRateLimit above only counts *failed*
+// attempts (right for login -- don't punish typos), but for registration
+// the abuse pattern is repeated *successful* signups (mass fake accounts),
+// which skipSuccessfulRequests would let straight through. Separate,
+// stricter limiter that counts every attempt. Now that signup is open
+// (no more invite gate), this gap actually matters.
+export const registerRateLimit = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: 'Too many accounts created from this network. Try again later.' },
+});
+
 // Search - generous but bounded: 60 per minute per IP
 export const searchRateLimit = rateLimit({
   windowMs: 60 * 1000,
