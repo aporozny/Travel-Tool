@@ -73,7 +73,7 @@ function Step1({ onNext }: StepProps) {
       </div>
 
       <div style={styles.section}>
-        <p style={styles.sectionLabel}>Experience in Southeast Asia</p>
+        <p style={styles.sectionLabel}>Travel experience</p>
         <div style={styles.grid}>
           {[['first_time', 'First time'], ['been_once_or_twice', 'Been once or twice'], ['seasoned', 'Seasoned traveller'], ['expat', 'Living here / expat']].map(([v, l]) => (
             <OptionCard key={v} label={l} selected={data.sea_experience_level === v} onClick={() => set('sea_experience_level', v)} />
@@ -515,6 +515,12 @@ function Step9({ onNext, onBack }: StepProps) {
 
 const STEP_COMPONENTS = [Step1, Step2, Step3, Step4, Step5, Step6, Step7, Step8, Step9];
 
+// Required before any content -- trip type + pace (Step1) and budget
+// (Step2). Everything else (Step3-Step9) used to block first access too;
+// now it's simply not part of the forced path. Revisiting it as an
+// optional "finish your profile" flow later is real, separate work.
+const REQUIRED_STEPS = 2;
+
 export default function OnboardingScreen({ onComplete }: { onComplete: () => void }) {
   const [currentStep, setCurrentStep] = useState(0);
   const [saving, setSaving] = useState(false);
@@ -538,10 +544,14 @@ export default function OnboardingScreen({ onComplete }: { onComplete: () => voi
   };
 
   const handleNext = async (data: any) => {
-    const ok = await saveStep(data, currentStep);
+    const isLastRequired = currentStep === REQUIRED_STEPS - 1;
+    const ok = await saveStep(
+      isLastRequired ? { ...data, onboarding_completed: true } : data,
+      currentStep,
+    );
     if (!ok) return;
 
-    if (currentStep === STEP_COMPONENTS.length - 1) {
+    if (isLastRequired) {
       onComplete();
     } else {
       setCurrentStep(s => s + 1);
@@ -556,7 +566,7 @@ export default function OnboardingScreen({ onComplete }: { onComplete: () => voi
     <div style={styles.container}>
       <div style={styles.header}>
         <p style={styles.headerLogo}>Travel Tool</p>
-        <ProgressBar step={currentStep + 1} total={STEP_COMPONENTS.length} />
+        <ProgressBar step={currentStep + 1} total={REQUIRED_STEPS} />
         <p style={styles.stepName}>{STEPS[currentStep]}</p>
       </div>
       <div style={styles.body}>

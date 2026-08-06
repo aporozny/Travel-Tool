@@ -30,7 +30,11 @@ const C = {
 export default function AppShell() {
   const dispatch = useDispatch<AppDispatch>();
   const { user } = useSelector((s: RootState) => s.auth);
-  const [tab, setTab] = useState<Tab>(user?.role === 'operator' ? 'dashboard' : 'community');
+  // Explore has real, worldwide content today; Community's cold-start
+  // problem (near-zero real posts for a new/early-stage platform) isn't
+  // something a query can fix, so it shouldn't be where a traveller
+  // lands by default while that's still true.
+  const [tab, setTab] = useState<Tab>(user?.role === 'operator' ? 'dashboard' : 'explore');
   const [detail, setDetail] = useState<any>(null);
   const [pendingConnections, setPendingConnections] = useState(0);
   const [unreadMessages, setUnreadMessages] = useState(0);
