@@ -88,7 +88,11 @@ export default function CommunityScreen() {
       <div style={styles.header}>
         <div>
           <h1 style={styles.title}>Community</h1>
-          <p style={styles.subtitle}>What's happening in Bali</p>
+          {/* Honest label: the default feed shows posts from your
+              connections and yourself, not a Bali-specific feed --
+              was hardcoded, same staleness pattern as the old Explore
+              destination pills. */}
+          <p style={styles.subtitle}>What's happening in your network</p>
         </div>
         <button style={styles.composeBtn} onClick={() => setComposing(true)}>
           + Post

@@ -41,6 +41,8 @@ function Step({ number, title, body }: { number: string; title: string; body: st
 export default function LandingScreen({ onJoin, onLogin }: Props) {
   const [stats, setStats] = useState({ members: '—', operators: '—', regions: '—' });
 
+  const [liveDestinations, setLiveDestinations] = useState<{ region: string; country: string }[]>([]);
+
   useEffect(() => {
     fetch('/health/stats')
       .then(r => r.json())
@@ -51,6 +53,12 @@ export default function LandingScreen({ onJoin, onLogin }: Props) {
           regions: data.regions > 1 ? data.regions.toString() : 'Bali',
         });
       }).catch(() => {});
+    // Same live-computed list Explore uses -- never a hand-maintained
+    // roadmap that goes stale the moment coverage changes.
+    fetch('/api/v1/discover/destinations')
+      .then(r => r.json())
+      .then(data => setLiveDestinations(data.featured || []))
+      .catch(() => {});
   }, []);
 
   return (
@@ -70,7 +78,9 @@ export default function LandingScreen({ onJoin, onLogin }: Props) {
       {/* Hero */}
       <section style={s.hero}>
         <div style={s.heroInner}>
-          <p style={s.heroEyebrow}>Now open · Bali, Indonesia</p>
+          <p style={s.heroEyebrow}>
+            {stats.regions !== '—' ? `Live in ${stats.regions} destinations worldwide` : 'Now open worldwide'}
+          </p>
           <h1 style={s.heroTitle}>Travel with<br />better people.</h1>
           <p style={s.heroSub}>
             Drift is a community for travellers who go deeper.
@@ -182,37 +192,31 @@ export default function LandingScreen({ onJoin, onLogin }: Props) {
         </div>
       </section>
 
-      {/* Destinations */}
-      <section style={s.destinations}>
-        <div style={s.sectionInner}>
-          <h2 style={s.sectionTitle}>Where we are now</h2>
-          <p style={s.destinationSub}>
-            We're starting deep, not wide. Bali and the Indonesian islands first —
-            Nusa Penida, Lombok, Gili Islands, Flores, Raja Ampat. We'd rather know
-            one destination exceptionally well than scratch the surface of fifty.
-          </p>
-          <div style={s.destGrid}>
-            {[
-              { name: 'Bali', status: 'Live', sub: 'Seminyak · Canggu · Ubud · Uluwatu · Amed' },
-              { name: 'Nusa Penida', status: 'Live', sub: 'Crystal Bay · Kelingking · Atuh' },
-              { name: 'Lombok', status: 'Coming soon', sub: 'Senggigi · Kuta · Gili Islands' },
-              { name: 'Flores', status: 'Coming soon', sub: 'Labuan Bajo · Komodo · Ende' },
-              { name: 'Raja Ampat', status: 'Coming soon', sub: 'Sorong · Wayag · Misool' },
-              { name: 'More', status: 'Beyond Indonesia', sub: 'Thailand · Vietnam · Sri Lanka · Japan' },
-            ].map(d => (
-              <div key={d.name} style={{ ...s.destCard, ...(d.status === 'Live' ? s.destCardLive : {}) }}>
-                <div style={s.destTop}>
-                  <h4 style={s.destName}>{d.name}</h4>
-                  <span style={{ ...s.destStatus, ...(d.status === 'Live' ? s.destStatusLive : {}) }}>
-                    {d.status}
-                  </span>
+      {/* Destinations -- live-computed, same source Explore uses. No
+          hardcoded roadmap: a fixed "coming soon" list is a future promise
+          the team gets held to long after coverage has actually changed. */}
+      {liveDestinations.length > 0 && (
+        <section style={s.destinations}>
+          <div style={s.sectionInner}>
+            <h2 style={s.sectionTitle}>Where travellers are exploring</h2>
+            <p style={s.destinationSub}>
+              Real, live coverage worldwide -- not a fixed list. Search any city,
+              island or town and Drift builds real coverage there on demand.
+            </p>
+            <div style={s.destGrid}>
+              {liveDestinations.map(d => (
+                <div key={d.region} style={{ ...s.destCard, ...s.destCardLive }}>
+                  <div style={s.destTop}>
+                    <h4 style={s.destName}>{d.region}</h4>
+                    <span style={{ ...s.destStatus, ...s.destStatusLive }}>Live</span>
+                  </div>
+                  <p style={s.destSub}>{d.country}</p>
                 </div>
-                <p style={s.destSub}>{d.sub}</p>
+              ))}
               </div>
-            ))}
           </div>
-        </div>
-      </section>
+        </section>
+      )}
 
       {/* Operator CTA */}
       <section style={s.operator}>
