@@ -9,9 +9,6 @@ const CATEGORIES = [
 	{ key: "transport", label: "Transport" },
 ];
 
-// Starter destinations shown before the traveller has any history of their own
-const SUGGESTED = ["Canggu", "Ubud", "Seminyak", "Saranda", "Ksamil", "Lisbon"];
-
 const RECENT_KEY = "drift_recent_destinations";
 
 function PhotoUrl(ref: string): string {
@@ -22,22 +19,6 @@ function PhotoUrl(ref: string): string {
 		return ref;
 	}
 	return `/api/v1/photos?ref=${ref}`;
-}
-
-function ScoreBadge({
-	score,
-	personalized,
-}: {
-	score: number;
-	personalized: boolean;
-}) {
-	if (!personalized || score === 0) return null;
-	const color = score >= 70 ? "#C9A84C" : score >= 40 ? "#F57F17" : "#888";
-	return (
-		<span style={{ ...styles.scoreBadge, background: color }}>
-			{score}% match
-		</span>
-	);
 }
 
 // A lone "1 saved" reads worse than no count at all -- people anchor on
@@ -90,9 +71,8 @@ function CardMetaRow({ item }: { item: any }) {
 	);
 }
 
-function ResultCard({ item, personalized, onSave, saved, onView }: any) {
+function ResultCard({ item, onSave, saved, onView }: any) {
 	const photo = item.photos?.[0] ? PhotoUrl(item.photos[0]) : null;
-	const score = Math.round((item.score / 100) * 100);
 
 	return (
 		<div
@@ -123,7 +103,6 @@ function ResultCard({ item, personalized, onSave, saved, onView }: any) {
 						{item.category?.[0]?.toUpperCase()}
 					</div>
 				)}
-				<ScoreBadge score={score} personalized={personalized} />
 				<button
 					style={{ ...styles.saveBtn, color: saved ? "#E53935" : "#fff" }}
 					onClick={(e) => {
@@ -307,6 +286,16 @@ export default function ExploreScreen({
 	const [sectionsLoading, setSectionsLoading] = useState(false);
 	const [destInput, setDestInput] = useState("");
 	const [recent, setRecent] = useState<string[]>(loadRecent);
+	// Live-computed destination picks (replaces the old hardcoded
+	// SUGGESTED list) -- see backend/src/services/discovery.ts.
+	const [discoverDestinations, setDiscoverDestinations] = useState<{
+		featured: { region: string; country: string }[];
+		somewhereNew: { region: string; country: string }[];
+	}>({ featured: [], somewhereNew: [] });
+	// Small editorial preview for the unscoped screen -- explicitly not a
+	// "For you" feed, no personalization score.
+	const [spotlight, setSpotlight] = useState<any[]>([]);
+	const [spotlightLoading, setSpotlightLoading] = useState(false);
 	const [search, setSearch] = useState("");
 	const [saves, setSaves] = useState<Set<string>>(new Set());
 	const [selected, setSelected] = useState<any>(null);
@@ -337,6 +326,16 @@ export default function ExploreScreen({
 	const RESULTS_PAGE_SIZE = 20;
 
 	const fetchResults = useCallback(async () => {
+		// No region and no category means nothing to scope this fetch by --
+		// skip it entirely rather than hit the unscoped, catalog-volume-
+		// biased query. The unscoped screen shows destination picks and
+		// the spotlight preview instead; this only needs to run once a
+		// region and/or category narrows what "results" even means.
+		if (!region && !category) {
+			setResults([]);
+			setHasMore(false);
+			return;
+		}
 		setLoading(true);
 		try {
 			const params: any = { limit: RESULTS_PAGE_SIZE };
@@ -409,11 +408,16 @@ export default function ExploreScreen({
 	};
 
 	// Sectioned homepage rows -- only fetched (and only shown) when there's
-	// no category filter and no local text filter active. A handful of
-	// small per-category requests, not a rewrite of the main fetch path.
+	// no category filter and no local text filter active, AND a
+	// destination is actually selected. Without a region this used to
+	// query the whole catalog per category -- exactly how Bali/Albania
+	// (by far the deepest catalogs) ended up as 100% of every "For you"
+	// result regardless of who was looking or what they searched for.
+	// Unscoped browsing is handled by the spotlight preview instead (see
+	// below), which is explicitly editorial, not a personalized feed.
 	const SECTION_CATEGORIES = ["food", "accommodation", "activity", "transport"];
 	useEffect(() => {
-		if (category || search) return;
+		if (category || search || !region) return;
 		let cancelled = false;
 		setSectionsLoading(true);
 		Promise.all(
@@ -435,6 +439,32 @@ export default function ExploreScreen({
 			cancelled = true;
 		};
 	}, [category, search, region, subArea]);
+
+	// Live destination picks, fetched once -- daily-rotating on the
+	// backend, no need to refetch within a session.
+	useEffect(() => {
+		api
+			.get("/discover/destinations")
+			.then((r: any) =>
+				setDiscoverDestinations({
+					featured: r.data.featured || [],
+					somewhereNew: r.data.somewhereNew || [],
+				}),
+			)
+			.catch(() => {});
+	}, []);
+
+	// Editorial spotlight preview -- only relevant on the fully unscoped
+	// screen (no region, no category, no text filter).
+	useEffect(() => {
+		if (region || category || search) return;
+		setSpotlightLoading(true);
+		api
+			.get("/discover/spotlight")
+			.then((r: any) => setSpotlight(r.data.results || []))
+			.catch(() => setSpotlight([]))
+			.finally(() => setSpotlightLoading(false));
+	}, [region, category, search]);
 
 	// Point the screen at any destination on earth: warm the catalog (backend
 	// geocodes and fans out to live sources if it's new), learn the canonical
@@ -533,9 +563,10 @@ export default function ExploreScreen({
 		: results;
 
 	// Quick-pick pills: recents first, then suggestions they haven't tried
+	const featuredNames = discoverDestinations.featured.map((d) => d.region);
 	const quickPicks = [
 		...recent,
-		...SUGGESTED.filter(
+		...featuredNames.filter(
 			(s) => !recent.some((r) => r.toLowerCase() === s.toLowerCase()),
 		),
 	].slice(0, 8);
@@ -624,6 +655,26 @@ export default function ExploreScreen({
 							))}
 						</div>
 					)}
+
+					{/* A separate, lower-bar tier from the main picks above -- so a
+					    genuinely long-tail destination isn't hidden just because it
+					    hasn't been searched enough to be "featured" yet. */}
+					{!region && discoverDestinations.somewhereNew.length > 0 && (
+						<div style={styles.somewhereNewRow}>
+							<span style={styles.somewhereNewLabel}>Somewhere new</span>
+							<div style={styles.regionPills}>
+								{discoverDestinations.somewhereNew.map((d) => (
+									<button
+										key={d.region}
+										style={styles.destPill}
+										onClick={() => exploreDestination(d.region)}
+									>
+										{d.region}
+									</button>
+								))}
+							</div>
+						</div>
+					)}
 				</div>
 
 				{/* Filter within results */}
@@ -637,7 +688,11 @@ export default function ExploreScreen({
 				</div>
 
 				{/* Category filters -- a toggle-button group, not tabs: these
-				    compose with sub-area filters rather than switching panels. */}
+				    compose with sub-area filters rather than switching panels.
+				    Non-"All" categories are disabled until a destination is
+				    picked: filtering by category with no region would re-run
+				    the same unscoped, catalog-volume-biased query the
+				    destination-picking redesign exists to fix. */}
 				<div style={styles.filterRow} role="group" aria-label="Filter by category">
 					<div style={styles.filterScroll}>
 						{CATEGORIES.map((c) => (
@@ -646,8 +701,10 @@ export default function ExploreScreen({
 								style={{
 									...styles.filterChip,
 									...(category === c.key ? styles.filterChipActive : {}),
+									...(!region && c.key ? styles.filterChipDisabled : {}),
 								}}
 								aria-pressed={category === c.key}
+								disabled={!region && !!c.key}
 								onClick={() => setCategory(c.key)}
 							>
 								{c.label}
@@ -743,6 +800,38 @@ export default function ExploreScreen({
 							</button>
 						)}
 					</>
+				)
+			) : !region ? (
+				// Fully unscoped: destination-picking pills (above) are the
+				// point of this screen. This is a small editorial preview,
+				// not a personalized "For you" feed -- no score, quota-capped
+				// across a few featured destinations so none can dominate.
+				spotlightLoading ? (
+					<div style={styles.loading}>Finding places for you...</div>
+				) : spotlight.length === 0 ? (
+					<div style={styles.empty}>
+						Search a destination above to start exploring.
+					</div>
+				) : (
+					<div style={styles.sectionsContainer}>
+						<div style={styles.sectionBlock}>
+							<div style={styles.sectionHeader}>
+								<h3 style={styles.sectionTitle}>Popular starting points</h3>
+							</div>
+							<div style={styles.grid}>
+								{spotlight.map((item) => (
+									<ResultCard
+										key={`${item.type || "place"}-${item.id}`}
+										item={item}
+										personalized={false}
+										onSave={handleSave}
+										saved={saves.has(item.id)}
+										onView={handleView}
+									/>
+								))}
+							</div>
+						</div>
+					</div>
 				)
 			) : sectionsLoading ? (
 				<div style={styles.loading}>
@@ -858,6 +947,14 @@ const styles: Record<string, React.CSSProperties> = {
 	},
 	tripPill: { borderColor: "#C9A84C !important" as any },
 	regionPills: { display: "flex", gap: 6, flexWrap: "wrap" as const },
+	somewhereNewRow: { marginTop: 10 },
+	somewhereNewLabel: {
+		display: "block",
+		fontSize: 12,
+		fontWeight: 600,
+		color: "#888",
+		marginBottom: 6,
+	},
 	destPill: {
 		padding: "5px 12px",
 		borderRadius: 20,
@@ -909,6 +1006,10 @@ const styles: Record<string, React.CSSProperties> = {
 		background: "#FBF5E6",
 		color: "#C9A84C",
 		fontWeight: 500,
+	},
+	filterChipDisabled: {
+		opacity: 0.4,
+		cursor: "not-allowed",
 	},
 	personalizedNote: {
 		fontSize: 12,
