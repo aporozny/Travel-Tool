@@ -178,7 +178,7 @@ function ResultCard({ item, onSave, saved, onView }: any) {
 // never a relabeled version of one as the other -- toOfferView on the
 // backend is what actually enforces this; this component just renders
 // whichever one comes back.
-function BookingOffers({ placeId }: { placeId: string }) {
+function BookingOffers({ item }: { item: any }) {
 	const [offers, setOffers] = useState<any[]>([]);
 	const [loading, setLoading] = useState(true);
 
@@ -186,7 +186,7 @@ function BookingOffers({ placeId }: { placeId: string }) {
 		let cancelled = false;
 		setLoading(true);
 		api
-			.get(`/offers/place/${placeId}`)
+			.get(`/offers/place/${item.id}`)
 			.then((r: any) => {
 				if (!cancelled) setOffers(r.data.offers || []);
 			})
@@ -199,7 +199,27 @@ function BookingOffers({ placeId }: { placeId: string }) {
 		return () => {
 			cancelled = true;
 		};
-	}, [placeId]);
+	}, [item.id]);
+
+	// Viator's Basic Access tier means the actual booking happens entirely
+	// on Viator's own site -- Drift gets no webhook/confirmation back at
+	// this tier. Click-through is the only real signal available, and
+	// it's what the Phase 2 gate decision (click-through-to-booking rate)
+	// depends on. Reuses the existing interaction-tracking endpoint rather
+	// than new infrastructure -- "book" also feeds the personalization
+	// scoring system for free, a stronger signal than a mere view.
+	const trackClick = () => {
+		api
+			.post("/recommendations/interact", {
+				entity_type: item.type,
+				entity_id: item.id,
+				interaction_type: "book",
+				region: item.region,
+				category: item.category,
+				tags: item.tags,
+			})
+			.catch(() => {});
+	};
 
 	if (loading || offers.length === 0) return null;
 
@@ -222,6 +242,7 @@ function BookingOffers({ placeId }: { placeId: string }) {
 									target="_blank"
 									rel="noopener noreferrer"
 									style={styles.bookNowBtn}
+									onClick={trackClick}
 								>
 									Visit {offer.operatorContact.name}
 								</a>
@@ -243,6 +264,7 @@ function BookingOffers({ placeId }: { placeId: string }) {
 								target="_blank"
 								rel="noopener noreferrer"
 								style={styles.bookNowBtn}
+								onClick={trackClick}
 							>
 								Check availability
 							</a>
@@ -326,7 +348,7 @@ function DetailPanel({ item, onClose, onBook }: any) {
 						Request booking
 					</button>
 				)}
-				{item.type === "place" && <BookingOffers placeId={item.id} />}
+				{item.type === "place" && <BookingOffers item={item} />}
 			</div>
 		</div>
 	);
