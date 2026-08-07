@@ -172,6 +172,88 @@ function ResultCard({ item, onSave, saved, onView }: any) {
 	);
 }
 
+// Two states only, matching the agreed design: a claimed operator's own
+// channel (zero commission, always wins when it exists), or a plainly-
+// labeled third-party rate Drift earns a disclosed fee on. Never both,
+// never a relabeled version of one as the other -- toOfferView on the
+// backend is what actually enforces this; this component just renders
+// whichever one comes back.
+function BookingOffers({ placeId }: { placeId: string }) {
+	const [offers, setOffers] = useState<any[]>([]);
+	const [loading, setLoading] = useState(true);
+
+	useEffect(() => {
+		let cancelled = false;
+		setLoading(true);
+		api
+			.get(`/offers/place/${placeId}`)
+			.then((r: any) => {
+				if (!cancelled) setOffers(r.data.offers || []);
+			})
+			.catch(() => {
+				if (!cancelled) setOffers([]);
+			})
+			.finally(() => {
+				if (!cancelled) setLoading(false);
+			});
+		return () => {
+			cancelled = true;
+		};
+	}, [placeId]);
+
+	if (loading || offers.length === 0) return null;
+
+	return (
+		<div style={styles.bookingOffers}>
+			{offers.map((offer) => (
+				<div key={offer.id} style={styles.bookingOfferCard}>
+					{offer.operatorContact ? (
+						<>
+							<p style={styles.bookingOfferLabel}>
+								<span aria-hidden="true">✓ </span>
+								Claimed by operator
+							</p>
+							<p style={styles.bookingOfferSub}>
+								Book direct · $0 commission
+							</p>
+							{offer.operatorContact.website && (
+								<a
+									href={offer.operatorContact.website}
+									target="_blank"
+									rel="noopener noreferrer"
+									style={styles.bookNowBtn}
+								>
+									Visit {offer.operatorContact.name}
+								</a>
+							)}
+							{!offer.operatorContact.website && offer.operatorContact.phone && (
+								<p style={styles.detailPhone}>{offer.operatorContact.phone}</p>
+							)}
+						</>
+					) : (
+						<>
+							<p style={styles.bookingOfferLabel}>Book via partner</p>
+							<p style={styles.bookingOfferSub}>
+								{offer.priceAmount != null
+									? `From ${offer.priceCurrency || ""} ${offer.priceAmount}`
+									: "Drift earns a booking fee, disclosed"}
+							</p>
+							<a
+								href={offer.checkoutUrl}
+								target="_blank"
+								rel="noopener noreferrer"
+								style={styles.bookNowBtn}
+							>
+								Check availability
+							</a>
+						</>
+					)}
+				</div>
+			))}
+		</div>
+	);
+}
+
 function DetailPanel({ item, onClose, onBook }: any) {
 	const photos = item.photos || [];
 
@@ -244,6 +326,7 @@ function DetailPanel({ item, onClose, onBook }: any) {
 						Request booking
 					</button>
 				)}
+				{item.type === "place" && <BookingOffers placeId={item.id} />}
 			</div>
 		</div>
 	);
@@ -1286,5 +1369,28 @@ const styles: Record<string, React.CSSProperties> = {
 		fontSize: 16,
 		fontWeight: 600,
 		cursor: "pointer",
+	},
+	bookingOffers: { marginTop: 8 },
+	bookingOfferCard: {
+		background: "#F8F7F4",
+		borderRadius: 12,
+		padding: "12px 14px",
+		marginBottom: 10,
+	},
+	bookingOfferLabel: { fontSize: 13, fontWeight: 600, margin: "0 0 2px", color: "#1a1a1a" },
+	bookingOfferSub: { fontSize: 12, color: "#888", margin: "0 0 10px" },
+	bookNowBtn: {
+		display: "block",
+		textAlign: "center" as const,
+		width: "100%",
+		padding: "10px 0",
+		background: "#fff",
+		color: "#C9A84C",
+		border: "1px solid #C9A84C",
+		borderRadius: 10,
+		fontSize: 14,
+		fontWeight: 600,
+		textDecoration: "none",
+		boxSizing: "border-box" as const,
 	},
 };
