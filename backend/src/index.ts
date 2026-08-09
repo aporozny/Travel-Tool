@@ -24,6 +24,7 @@ import { communityRouter } from './routes/community';
 import { discoverRouter } from './routes/discover';
 import { offersRouter } from './routes/offers';
 import { profileRouter } from './routes/profile';
+import { voiceAgentRouter } from './routes/voiceAgent';
 import { errorHandler } from './middleware/errorHandler';
 import { notFound } from './middleware/notFound';
 import { authRateLimit, searchRateLimit, apiRateLimit } from './middleware/rateLimit';
@@ -62,6 +63,7 @@ app.use('/api/v1/messages', messagesRouter);
 app.use('/api/v1/photos', photosRouter);
 app.use('/api/v1/community', communityRouter);
 app.use('/api/v1/discover', discoverRouter);
+app.use('/api/v1/voice', voiceAgentRouter);
 app.use('/api/v1/offers', offersRouter);
 app.use('/api/v1/profile', profileRouter);
 

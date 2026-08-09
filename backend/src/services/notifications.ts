@@ -132,6 +132,33 @@ This alert was sent via Drift.
   }));
 }
 
+interface ReviewerAlert {
+  subject: string;
+  body: string;
+  urgent: boolean;
+}
+
+// Page a human Drift reviewer -- used by the Safety Line voice agent, which
+// is deliberately never allowed to resolve or dismiss a case itself (see
+// sos_ai_calls / voiceAgent.ts). Degrades gracefully like the rest of this
+// file: if SAFETY_REVIEWER_EMAIL/PHONE aren't configured, this logs instead
+// of throwing, so a missing reviewer contact can't crash a live call's
+// webhook handler.
+export async function sendReviewerAlert(alert: ReviewerAlert): Promise<void> {
+  console.log(`=== REVIEWER ALERT (${alert.urgent ? 'URGENT' : 'standard'}) ===`);
+  console.log('Subject:', alert.subject);
+  console.log('Body:', alert.body);
+  console.log('====================');
+
+  const reviewerEmail = process.env.SAFETY_REVIEWER_EMAIL;
+  const reviewerPhone = process.env.SAFETY_REVIEWER_PHONE;
+
+  await Promise.allSettled([
+    reviewerEmail ? sendEmail(reviewerEmail, alert.subject, alert.body) : Promise.resolve(false),
+    alert.urgent && reviewerPhone ? sendSms(reviewerPhone, `${alert.subject}: ${alert.body}`.slice(0, 300)) : Promise.resolve(false),
+  ]);
+}
+
 // Send booking notification to traveler and operator
 export async function sendBookingNotification(data: BookingNotification): Promise<void> {
   const messages: Record<string, { traveler: string; operator: string }> = {
