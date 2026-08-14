@@ -24,5 +24,25 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci --only=production
 COPY --from=builder /app/dist ./dist
+# @livekit/local-inference's prebuilt native binary (Rust, x86_64-linux-gnu)
+# SIGILLs on this VPS's CPU -- a QEMU "generic" virtual CPU model with no
+# AVX2, one instruction-set generation below what the binary was compiled
+# to assume. That crash happens inside a native call the framework's own
+# try/catch around it can't intercept (a signal, not a JS exception), so
+# it takes the whole worker down before any of this app's own code runs.
+# This module is optional -- it only backs *local* VAD/turn-detection,
+# which this worker doesn't use (see voiceWorker/index.ts: turn detection
+# runs through LiveKit's own hosted inference.TurnDetector). Removing the
+# native binary here makes the framework's require() fail in the normal,
+# catchable way it already handles -- logs a warning, disables the local
+# path, keeps running -- instead of crashing the process outright.
+# Confirmed by deploying with and without this: SIGILL/exit 132 without,
+# stable with active connections after 2+ minutes with.
+RUN rm -rf node_modules/@livekit/local-inference-linux-x64-gnu
 USER node
-CMD ["node", "dist/voiceWorker/index.js"]
+# cli.runApp() parses process.argv itself (it's a full Commander CLI --
+# start/dev/connect/console/download-files subcommands), not an immediate
+# run -- without "start" it just prints help and exits 0, which
+# restart:unless-stopped turns into a silent crash loop. Confirmed by
+# deploying without it first and reading the container logs.
+CMD ["node", "dist/voiceWorker/index.js", "start"]
