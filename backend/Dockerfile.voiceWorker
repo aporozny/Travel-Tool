@@ -1,0 +1,28 @@
+# Separate from the main backend Dockerfile deliberately: LiveKit Agents'
+# own guidance calls for Node 24+, while the existing backend service runs
+# proven and working on node:20-alpine. Bumping the shared Dockerfile's base
+# image to touch both services risked destabilizing traveller-backend for
+# no reason -- this worker is the only thing that actually needs the newer
+# runtime, so it gets its own image instead.
+#
+# slim (Debian/glibc), not alpine (musl): @livekit/rtc-node ships prebuilt
+# native FFI bindings that only target glibc. On alpine those bindings
+# fail to load at require-time with MODULE_NOT_FOUND, before any of this
+# worker's own code -- including its own credential-idle guard -- ever
+# runs, which crash-loops the container. Confirmed by trying alpine first.
+FROM node:24-slim AS base
+WORKDIR /app
+COPY package*.json ./
+
+FROM base AS builder
+RUN npm ci
+COPY . .
+RUN npm run build
+
+FROM node:24-slim AS production
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --only=production
+COPY --from=builder /app/dist ./dist
+USER node
+CMD ["node", "dist/voiceWorker/index.js"]

@@ -1,4 +1,4 @@
-import { Router, Request, Response, NextFunction } from "express";
+import { Router, Request, Response } from "express";
 import { z } from "zod";
 import {
 	startCall,
@@ -7,26 +7,19 @@ import {
 	recordBridgeAttempt,
 	endCall,
 } from "../services/voiceAgent";
+import { requireWebhookSecret } from "../middleware/requireWebhookSecret";
 
 export const voiceAgentRouter = Router();
 
-// The voice AI platform (Retell) calls these mid-call and at call end --
-// there's no user session to authenticate against, so this is gated by a
-// shared secret instead of the usual JWT `authenticate` middleware. Unset
-// VOICE_WEBHOOK_SECRET means the route is closed, not open -- fail closed,
-// same as every other credential-gated feature shipped so far (Viator,
-// booking): inactive until configured, never silently permissive.
-function requireWebhookSecret(req: Request, res: Response, next: NextFunction) {
-	const configured = process.env.VOICE_WEBHOOK_SECRET;
-	if (!configured) {
-		return res.status(503).json({ message: "Voice agent not configured" });
-	}
-	if (req.header("x-webhook-secret") !== configured) {
-		return res.status(401).json({ message: "Unauthorized" });
-	}
-	return next();
-}
-
+// Webhook-style routes for a hosted, dashboard-configured voice AI
+// platform (Retell-shaped tool-calling: a custom header + secret per the
+// platform's own config, no user session to authenticate against). The
+// production integration is voiceWorker/ instead -- a LiveKit Agents
+// worker that calls startCall()/endCall() etc. directly, in-process, with
+// no webhook hop at all. This router is kept as a working fallback for
+// any future platform that only speaks webhooks; see
+// requireWebhookSecret.ts for the fail-closed default it shares with
+// every other credential-gated route in this codebase.
 voiceAgentRouter.use(requireWebhookSecret);
 
 const callStartedSchema = z.object({

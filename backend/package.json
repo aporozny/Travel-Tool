@@ -12,6 +12,11 @@
     "lint": "eslint src --ext .ts"
   },
   "dependencies": {
+    "@elevenlabs/elevenlabs-js": "^2.63.0",
+    "@livekit/agents": "^1.6.3",
+    "@livekit/agents-plugin-anthropic": "^1.6.3",
+    "@livekit/agents-plugin-elevenlabs": "^1.6.3",
+    "@livekit/rtc-node": "^0.13.33",
     "@sendgrid/mail": "^8.1.6",
     "axios": "^1.15.0",
     "bcryptjs": "^2.4.3",

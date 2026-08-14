@@ -56,6 +56,33 @@ services:
     volumes:
       - ./backend/src:/app/src
       - /var/www/drift/uploads:/app/uploads
+  voice-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.voiceWorker
+    container_name: traveller-voice-worker
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://traveller:traveller@postgres:5432/traveller_dev
+      REDIS_URL: redis://traveller-redis:6379
+      SENDGRID_API_KEY: ${SENDGRID_API_KEY}
+      SENDGRID_FROM_EMAIL: ${SENDGRID_FROM_EMAIL}
+      MOBILEMESSAGE_API_USERNAME: ${MOBILEMESSAGE_API_USERNAME}
+      MOBILEMESSAGE_API_PASSWORD: ${MOBILEMESSAGE_API_PASSWORD}
+      MOBILEMESSAGE_SENDER: ${MOBILEMESSAGE_SENDER}
+      SAFETY_REVIEWER_EMAIL: ${SAFETY_REVIEWER_EMAIL}
+      SAFETY_REVIEWER_PHONE: ${SAFETY_REVIEWER_PHONE}
+      LIVEKIT_URL: ${LIVEKIT_URL}
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY}
+      ELEVENLABS_VOICE_ID: ${ELEVENLABS_VOICE_ID}
+      VOICE_AGENT_LLM_MODEL: ${VOICE_AGENT_LLM_MODEL}
+    depends_on:
+      - postgres
+      - redis
 volumes:
   postgres_data:
     external: true
