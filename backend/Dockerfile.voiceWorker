@@ -21,6 +21,16 @@ RUN npm run build
 
 FROM node:24-slim AS production
 WORKDIR /app
+# node:24-slim strips the system CA bundle to save space. @livekit/rtc-node
+# is a Rust native binding that does its own TLS trust verification
+# (rustls-style, not Node's own OpenSSL/CA handling) when connecting to
+# LiveKit's media servers -- without a CA bundle on disk it fails with
+# "no native root CA certificates found" on the very first real call,
+# even though the worker registers with LiveKit Cloud fine beforehand
+# (that WebSocket connection apparently uses a different TLS path).
+# Confirmed live: the first real inbound call reached the agent
+# (dispatch rule routing worked) and failed exactly here.
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
 COPY package*.json ./
 RUN npm ci --only=production
 COPY --from=builder /app/dist ./dist

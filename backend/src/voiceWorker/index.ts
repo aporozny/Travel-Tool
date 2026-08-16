@@ -6,7 +6,7 @@ import { startCall, endCall } from "../services/voiceAgent";
 import type { CallOutcome } from "../services/voiceAgent";
 import { createSafetyAgent } from "./agent";
 
-const DEFAULT_ELEVENLABS_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"; // ElevenLabs' "Rachel" -- calm, clear default until a voice is chosen deliberately.
+const DEFAULT_ELEVENLABS_VOICE_ID = "EXAVITQu4vr4xnSDxMaL"; // ElevenLabs "Sarah" -- Mature, Reassuring, Confident. Verified against the real account (the old default, Rachel, was from ElevenLabs' deprecated premade-voice library and 404'd on this account).
 
 function flattenHistory(history: { items: unknown[] } | undefined): string | null {
 	if (!history || !Array.isArray(history.items) || history.items.length === 0) return null;
@@ -60,7 +60,25 @@ export default defineAgent({
 				apiKey: process.env.ELEVENLABS_API_KEY,
 				voiceId: process.env.ELEVENLABS_VOICE_ID || DEFAULT_ELEVENLABS_VOICE_ID,
 			}),
-			turnHandling: { turnDetection: new inference.TurnDetector() },
+			// Verified live against a real call: the default 500ms endpointing
+			// minDelay was too tight for this pipeline (cloud STT + cloud turn
+			// detector, no local VAD assist -- see the Dockerfile's note on why
+			// @livekit/local-inference is removed). The framework's own log
+			// line named the problem exactly: "transcript arrives after turn
+			// has been committed" -- it kept declaring the caller's turn over
+			// before STT had actually finished transcribing, generating a
+			// reply, getting invalidated when the real transcript landed, and
+			// restarting -- audible as a stutter of half-words cut short.
+			// preemptiveGeneration made this worse, not better: this agent's
+			// four tools change tool choice/context turn to turn, which
+			// invalidated nearly every preemptive attempt in the test call's
+			// logs. For a distress line, a reliably complete reply a few
+			// hundred ms later beats a faster one that stutters and restarts.
+			turnHandling: {
+				turnDetection: new inference.TurnDetector(),
+				endpointing: { minDelay: 900, maxDelay: 4000 },
+				preemptiveGeneration: { enabled: false },
+			},
 		});
 
 		try {
