@@ -7,9 +7,10 @@ import api from '../services/api.web';
 
 export default function LoginScreen() {
   const dispatch = useDispatch<AppDispatch>();
-  const [mode, setMode] = useState<'landing' | 'login' | 'waitlist' | 'register'>('landing');
+  const [mode, setMode] = useState<'landing' | 'login' | 'waitlist' | 'register' | 'forgot-password' | 'reset-password'>('landing');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [name, setName] = useState('');
   const [destination, setDestination] = useState('');
   const [role, setRole] = useState<'traveler' | 'operator'>('traveler');
@@ -18,6 +19,9 @@ export default function LoginScreen() {
   const [waitlistSuccess, setWaitlistSuccess] = useState(false);
   const [inviteToken, setInviteToken] = useState<string | null>(null);
   const [inviteEmail, setInviteEmail] = useState('');
+  const [resetToken, setResetToken] = useState<string | null>(null);
+  const [forgotPasswordSent, setForgotPasswordSent] = useState(false);
+  const [resetPasswordSuccess, setResetPasswordSuccess] = useState(false);
 
   // Check for invite token in URL
   useEffect(() => {
@@ -43,6 +47,22 @@ export default function LoginScreen() {
           setError('This invite link is invalid or has expired.');
           setMode('login');
         });
+    }
+  }, []);
+
+  // Same pattern as the /invite/:token check above -- reset-password uses a
+  // query param (?token=) instead of a path segment since that's what the
+  // backend's emailed link generates (FRONTEND_URL + /reset-password?token=).
+  useEffect(() => {
+    if (window.location.pathname === '/reset-password') {
+      const token = new URLSearchParams(window.location.search).get('token');
+      if (token) {
+        setResetToken(token);
+        setMode('reset-password');
+      } else {
+        setError('This reset link is missing its token.');
+        setMode('login');
+      }
     }
   }, []);
 
@@ -84,6 +104,36 @@ export default function LoginScreen() {
     try {
       await api.post('/waitlist', { email, name: name || undefined, destination: destination || undefined, source: 'direct' });
       setWaitlistSuccess(true);
+    } catch (err: any) {
+      setError(err?.response?.data?.message || 'Something went wrong. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    if (!email) { setError('Please enter your email address'); return; }
+    setLoading(true);
+    setError('');
+    try {
+      await api.post('/auth/forgot-password', { email });
+      setForgotPasswordSent(true);
+    } catch (err: any) {
+      setError(err?.response?.data?.message || 'Something went wrong. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResetPassword = async () => {
+    if (!password || !confirmPassword) { setError('Please fill in both password fields'); return; }
+    if (password !== confirmPassword) { setError('Passwords do not match'); return; }
+    if (password.length < 8) { setError('Password must be at least 8 characters'); return; }
+    setLoading(true);
+    setError('');
+    try {
+      await api.post('/auth/reset-password', { token: resetToken, password });
+      setResetPasswordSuccess(true);
     } catch (err: any) {
       setError(err?.response?.data?.message || 'Something went wrong. Please try again.');
     } finally {
@@ -223,6 +273,83 @@ export default function LoginScreen() {
     );
   }
 
+  // Forgot-password form
+  if (mode === 'forgot-password') {
+    return (
+      <div style={s.page}>
+        <div style={s.card}>
+          <button style={s.back} onClick={() => { setMode('login'); setError(''); setForgotPasswordSent(false); }}>← Back to sign in</button>
+          <h1 style={s.logo}>◈ Drift</h1>
+          <p style={s.tagline}>Reset your password</p>
+
+          {forgotPasswordSent ? (
+            <div style={s.success}>
+              <p style={s.successTitle}>Check your email</p>
+              <p style={s.successSub}>If an account exists for that email, we've sent a link to reset your password. It expires in 1 hour.</p>
+              <button style={s.back} onClick={() => { setMode('login'); setForgotPasswordSent(false); }}>← Back to sign in</button>
+            </div>
+          ) : (
+            <>
+              {error && <div style={s.error}>{error}</div>}
+              <div style={s.field}>
+                <label style={s.label}>Email</label>
+                <input style={s.input} type="email" value={email}
+                  onChange={e => setEmail(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleForgotPassword()}
+                  placeholder="you@example.com" autoFocus />
+              </div>
+              <button style={{ ...s.submit, opacity: loading ? 0.7 : 1 }}
+                onClick={handleForgotPassword} disabled={loading}>
+                {loading ? 'Sending...' : 'Send reset link'}
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // Reset-password form (reached via the emailed link's ?token=)
+  if (mode === 'reset-password') {
+    return (
+      <div style={s.page}>
+        <div style={s.card}>
+          <h1 style={s.logo}>◈ Drift</h1>
+          <p style={s.tagline}>Choose a new password</p>
+
+          {resetPasswordSuccess ? (
+            <div style={s.success}>
+              <p style={s.successTitle}>Password updated</p>
+              <p style={s.successSub}>You can now sign in with your new password.</p>
+              <button style={s.submit as React.CSSProperties} onClick={() => { setMode('login'); setPassword(''); setConfirmPassword(''); setResetPasswordSuccess(false); }}>Sign in</button>
+            </div>
+          ) : (
+            <>
+              {error && <div style={s.error}>{error}</div>}
+              <div style={s.field}>
+                <label style={s.label}>New password</label>
+                <input style={s.input} type="password" value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  placeholder="Min 8 characters" autoFocus />
+              </div>
+              <div style={s.field}>
+                <label style={s.label}>Confirm new password</label>
+                <input style={s.input} type="password" value={confirmPassword}
+                  onChange={e => setConfirmPassword(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleResetPassword()}
+                  placeholder="Min 8 characters" />
+              </div>
+              <button style={{ ...s.submit, opacity: loading ? 0.7 : 1 }}
+                onClick={handleResetPassword} disabled={loading}>
+                {loading ? 'Updating...' : 'Update password'}
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   // Login form
   return (
     <div style={s.page}>
@@ -253,6 +380,10 @@ export default function LoginScreen() {
           onClick={handleLogin} disabled={loading}>
           {loading ? 'Signing in...' : 'Sign in'}
         </button>
+
+        <p style={s.fine}>
+          <button style={s.link} onClick={() => { setMode('forgot-password'); setError(''); }}>Forgot password?</button>
+        </p>
 
         <p style={s.fine}>
           Don't have an account?{' '}
