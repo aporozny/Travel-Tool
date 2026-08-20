@@ -10,5 +10,11 @@
 | R6 | Single GOOGLE_PLACES_API_KEY in container env; loss of key = discovery down | L | H | Key documented in DR-RUNBOOK (location, not value); regenerate via Google console | Andre | Open |
 | R7 | Postgres data loss (places_cache, member data) | L | H | Nightly `drift-db` dump exists in ~/backups (root cron); verify restore path in DR-RUNBOOK | Andre | Open |
 | R8 | Verified-bonus cap reduces operator upsell incentive | M | L | Business decision documented; tier benefits can move to placement (badges, "featured" row) not rank distortion | Andre | Open |
+| R9 | Seller-of-Travel registration exposure for Duffel flights/hotels bookings (CA/FL/WA/HI/NV register based on customer residence, not company location) | M | H | Legal review required before go-live in those states; no code-level exclusion of any state or region -- explicit Executive instruction | Andre | Open |
+| R10 | `GOOGLE_PLACES_API_KEY` exposed in git history (public repo) even after removal from the current `docker-compose.yml` | H | M | Rotate key in Google Cloud Console, add HTTP referrer restrictions | Andre | Open |
+| R11 | Voice agent's `offer_contact_bridge` does not perform a live SIP transfer -- caller told a reviewer will follow up, not connected live | L | M | Real transfer is a real LiveKit capability, not yet built; Executive asked to be reminded to revisit | Andre | Open |
+| R12 | Duffel Flights/Stays payment architecture undecided (Balance+markup vs. Card+commission) -- changes PCI scope and possibly Seller-of-Travel exposure | M | H | Executive decision required before checkout/order-creation is built for either product | Andre | Open |
+| R13 | `SAFETY_REVIEWER_EMAIL`/`SAFETY_REVIEWER_PHONE` unset -- voice agent escalations log but page no one | H | H | Set a real reviewer contact | Andre | Open |
+| R14 | No Privacy Policy or Terms of Service exist while Drift collects emails, phone numbers, safety-contact info, and voice call transcripts | M | H | Legal review + real ToS/Privacy pages, not a template | Andre | Open |
 
 Review at each stage boundary.

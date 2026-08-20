@@ -51,9 +51,17 @@ See PRODUCT-DESCRIPTIONS.md. Summary:
 ## 4. Stage plan structure
 | Stage | Content | Status |
 |---|---|---|
-| Stage 1 | P1–P6: world-wide discovery + honest scoring + docs | **Current** — see STAGE-PLAN-1.md |
-| Stage 2 | Social-proof signals in ranking; interaction learning loop | Planned |
-| Stage 3 | Viator bookable tours; Foursquare second source + dedup | Planned |
+| Stage 1 | World-wide discovery + honest scoring + docs | Complete — see STAGE-PLAN-1.md |
+| Stage 2 | Social-proof signals in ranking; interaction learning loop | Complete — see STAGE-PLAN-2.md |
+| Stage 3 | Sub-areas / geographic drill-down | Complete — see STAGE-PLAN-3.md |
+| Stage 4 | Coverage gating + test-suite fixes | Complete — see STAGE-PLAN-4.md |
+| Stage 5 | Surface the discovery engine in the UI (Bali/Albania hardcode removal, public site fix) | Complete — see STAGE-PLAN-5.md |
+| Stage 6 | Booking ecosystem Phase 1: activities via Viator | Code complete, live pending VIATOR_API_KEY — see STAGE-PLAN-6.md |
+| Stage 7 | Drift Safety Line: inbound voice agent (LiveKit + Claude + ElevenLabs) | Live — see STAGE-PLAN-7.md |
+| Stage 8 | Public launch readiness: security audit, password reset | Complete, two Executive actions open — see STAGE-PLAN-8.md |
+| Stage 9 | Owner-curated Trips with RSVP | Complete — see STAGE-PLAN-9.md |
+| Stage 10 | Booking ecosystem Phase 2: flights via Duffel (search live, checkout pending) | Search live, checkout blocked on Executive decision — see STAGE-PLAN-10.md |
+| Stage 11 | Booking ecosystem Phase 3: stays/hotels via Duffel | Research complete, build not started — see STAGE-PLAN-11.md |
 
 ## 5. Project controls
 - **Tolerances:** Stage 1 time ±1 session; scope: P1–P6 fixed, no gold-plating. Escalate to Executive if any product cannot be delivered.

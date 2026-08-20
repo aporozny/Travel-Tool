@@ -9,21 +9,33 @@ Internet → Cloudflare Tunnel (drifttravel.app) → nginx :80 (host)
    nginx serves:  /            → static SPA from  web/dist
                   /api/*       → proxy http://localhost:5001  (traveller-backend)
 Docker (compose in repo root):
-   traveller-backend   node/express  host :5001 → container :5000
-   traveller-postgres  postgis/postgis:15-3.3   host :5432, db=traveller_dev user=traveller
-   traveller-redis     redis:7-alpine           host :6379
+   traveller-backend       node/express  host :5001 → container :5000
+   traveller-voice-worker  LiveKit Agents worker (Node 24, no exposed port -- registers outbound
+                            to LiveKit Cloud). Separate Dockerfile.voiceWorker: Node 24 not the
+                            main backend's Node 20, slim/glibc not alpine/musl (@livekit/rtc-node's
+                            native FFI bindings require glibc). Shares the backend's package.json/
+                            node_modules build context but is a distinct image.
+   traveller-postgres      postgis/postgis:15-3.3   host :5432, db=traveller_dev user=traveller
+   traveller-redis         redis:7-alpine           host :6379
 Uploads volume: /var/www/drift/uploads  →  /app/uploads in backend
+
+External services the stack depends on (Stage 7/10/11): LiveKit Cloud (voice agent transport +
+telephony number), Anthropic API (voice agent LLM), ElevenLabs API (voice agent TTS), Duffel API
+(flight/hotel search+booking). All degrade to "inactive, not crash-looping" if their API key is
+unset -- see each service's own fail-closed guard, not a DR concern on its own, but relevant if a
+key needs regenerating after a compromise.
 ```
 
 ## 2. Secrets & config locations (values NOT stored here)
 | Item | Where it lives |
 |---|---|
-| Backend env (JWT_SECRET, JWT_REFRESH_SECRET, GOOGLE_PLACES_API_KEY, VIATOR_API_KEY, VIATOR_API_BASE, FOURSQUARE_API_KEY, FETCH_DAILY_BUDGET, SENDGRID_*, MOBILEMESSAGE_*, DATABASE_URL, REDIS_URL, APP_URL, FRONTEND_URL, UPLOAD_DIR) | `backend/.env` on host (gitignored) + `docker-compose.yml` environment block. VIATOR/FOURSQUARE keys are optional — discovery degrades to Google-only without them. VIATOR_API_BASE defaults to production `https://api.viator.com/partner`; set to `https://api.sandbox.viator.com/partner` for a sandbox key. |
+| **`docker-compose.yml` env values** (JWT_SECRET, JWT_REFRESH_SECRET, GOOGLE_PLACES_API_KEY, VIATOR_API_KEY, VIATOR_API_BASE, FOURSQUARE_API_KEY, DUFFEL_API_KEY, ANTHROPIC_API_KEY, VOICE_AGENT_LLM_MODEL, ELEVENLABS_API_KEY, ELEVENLABS_VOICE_ID, LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET, VOICE_WEBHOOK_SECRET, SAFETY_REVIEWER_EMAIL, SAFETY_REVIEWER_PHONE, SENDGRID_*, MOBILEMESSAGE_*, APP_URL, FRONTEND_URL) | **`.env` at the repo root** (`/home/andre/projects/drift/.env`, gitignored) — this is what `docker-compose.yml`'s `${VAR}` substitution actually reads. Corrected here: this table previously said `backend/.env`, which is wrong for anything Docker-deployed — `backend/.env` only matters for `npm run dev` outside Docker. VIATOR/FOURSQUARE/DUFFEL/ANTHROPIC/ELEVENLABS/LIVEKIT keys are all optional at the infrastructure level — each dependent feature (activities booking, flights/stays booking, voice agent) fails closed (503/idle, not crash-looping) if its key is unset, not a deploy blocker. VIATOR_API_BASE defaults to production `https://api.viator.com/partner`; sandbox is `https://api.sandbox.viator.com/partner`. |
 | Cloudflare tunnel credentials | `/root/.cloudflared/b754118f-….json`; config `/etc/cloudflared/config.yml` |
 | nginx site | `/etc/nginx/sites-enabled/drift` |
-| Google Cloud console (key regen) | Google account of project owner |
+| Google Cloud console (key regen) | Google account of project owner. **GOOGLE_PLACES_API_KEY is currently in the public repo's git history** (Stage 8, I13) even though it's no longer in the current file — rotation still pending as of Stage 8. |
+| LiveKit / Duffel / Anthropic / ElevenLabs consoles (key regen) | Project owner's accounts on each platform |
 
-If `backend/.env` is lost: regenerate JWT secrets (users must re-login), regenerate Google/SendGrid/MobileMessage keys from their consoles.
+If the root `.env` is lost: regenerate JWT secrets (users must re-login), regenerate every third-party key from its own console. Nothing in `.env` is recoverable from a backup by design (gitignored, not in the Postgres dump).
 
 ## 3. Backups
 | What | Where | Schedule | Mechanism |
@@ -40,7 +52,7 @@ If `backend/.env` is lost: regenerate JWT secrets (users must re-login), regener
 # 0. Prereqs: docker + compose, nginx, cloudflared, node 20+ (for web build)
 git clone git@github.com:aporozny/Travel-Tool.git drift && cd drift
 
-# 1. Restore secrets → backend/.env  (see §2)
+# 1. Restore secrets → .env at repo root, NOT backend/.env  (see §2)
 
 # 2. Data layer
 docker volume create postgres_data
@@ -52,6 +64,14 @@ docker exec traveller-postgres pg_restore -U traveller -d traveller_dev --clean 
 # 3. Backend
 docker compose up -d --build backend
 curl -s localhost:5001/health   # expect {"status":"ok",...}
+
+# 3b. Voice worker (Stage 7) -- only registers with LiveKit if
+# LIVEKIT_URL/API_KEY/API_SECRET are set; otherwise idles cleanly, safe to
+# always run this step regardless of whether voice is configured yet.
+docker compose up -d --build voice-worker
+docker logs traveller-voice-worker --tail 5   # expect "registered worker" or the idle message, not a crash loop
+# If the Safety Line phone number changes, re-run (idempotent):
+#   cd backend && npx ts-node scripts/setupSip.ts '+1XXXXXXXXXX'
 
 # 4. Frontend
 cd web && npm ci && npm run build && cd ..   # outputs web/dist (nginx serves in place)
@@ -80,3 +100,5 @@ curl -sI https://drifttravel.app | head -1   # expect 200
 - Host port 5001 maps to container 5000; nginx proxies to 5001.
 - Uploads live outside the repo at `/var/www/drift/uploads` — include in any full backup.
 - Root cron also runs a second backup at `/home/backups/backup.sh` (separate legacy path).
+- Both `Dockerfile` and `Dockerfile.voiceWorker` share one `package.json`, whose `postinstall` (`scripts/patchAnthropicPlugin.js`, Stage 7 — patches `@livekit/agents-plugin-anthropic` to allow disabling Claude's extended thinking) needs `scripts/` copied into the build context *before* any `npm install`/`npm ci` in *every* stage of *both* Dockerfiles. Missing this fails the build outright (`npm ci` exits 1) rather than silently — see I19/L9. If adding a new Docker stage or a new service sharing this `package.json`, copy `scripts/` first.
+- `traveller-voice-worker` deliberately uses a different Node major version (24, not the main backend's 20) and a different base distro (`slim`/glibc, not `alpine`/musl) — `@livekit/rtc-node`'s native FFI bindings need glibc. Don't "simplify" these to match the main Dockerfile without re-testing; see STAGE-PLAN-7.md WP7.4 for why each diverges.
