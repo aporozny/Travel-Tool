@@ -12,6 +12,7 @@
     "lint": "eslint src --ext .ts"
   },
   "dependencies": {
+    "@duffel/api": "^4.28.0",
     "@elevenlabs/elevenlabs-js": "^2.63.0",
     "@livekit/agents": "^1.6.3",
     "@livekit/agents-plugin-anthropic": "^1.6.3",

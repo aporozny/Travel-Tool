@@ -25,6 +25,7 @@ import { discoverRouter } from './routes/discover';
 import { offersRouter } from './routes/offers';
 import { profileRouter } from './routes/profile';
 import { tripsRouter } from './routes/trips';
+import { flightsRouter } from './routes/flights';
 import { voiceAgentRouter } from './routes/voiceAgent';
 import { errorHandler } from './middleware/errorHandler';
 import { notFound } from './middleware/notFound';
@@ -68,6 +69,7 @@ app.use('/api/v1/voice', voiceAgentRouter);
 app.use('/api/v1/offers', offersRouter);
 app.use('/api/v1/profile', profileRouter);
 app.use('/api/v1/trips', tripsRouter);
+app.use('/api/v1/flights', flightsRouter);
 
 // Error handling
 app.use(notFound);
