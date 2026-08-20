@@ -13,6 +13,11 @@
 FROM node:24-slim AS base
 WORKDIR /app
 COPY package*.json ./
+# scripts/ has to arrive before `npm ci` -- postinstall
+# (patchAnthropicPlugin.js, see that file) runs during npm ci itself, so
+# copying the rest of the source afterward (further down) would be too
+# late for it to find the script it needs to run.
+COPY scripts ./scripts
 
 FROM base AS builder
 RUN npm ci
@@ -32,6 +37,7 @@ WORKDIR /app
 # (dispatch rule routing worked) and failed exactly here.
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
 COPY package*.json ./
+COPY scripts ./scripts
 RUN npm ci --only=production
 COPY --from=builder /app/dist ./dist
 # @livekit/local-inference's prebuilt native binary (Rust, x86_64-linux-gnu)

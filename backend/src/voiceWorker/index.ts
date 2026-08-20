@@ -1,4 +1,4 @@
-import { defineAgent, cli, WorkerOptions, voice, inference, type JobContext } from "@livekit/agents";
+import { defineAgent, cli, WorkerOptions, voice, inference, AgentSessionEventTypes, type JobContext } from "@livekit/agents";
 import { ParticipantKind } from "@livekit/rtc-node";
 import { LLM as AnthropicLLM } from "@livekit/agents-plugin-anthropic";
 import { TTS as ElevenLabsTTS } from "@livekit/agents-plugin-elevenlabs";
@@ -55,10 +55,33 @@ export default defineAgent({
 			llm: new AnthropicLLM({
 				model: process.env.VOICE_AGENT_LLM_MODEL || "claude-sonnet-5",
 				apiKey: process.env.ANTHROPIC_API_KEY,
-			}),
+				// The system prompt explicitly wants short turns ("every extra
+				// sentence is a sentence the caller isn't using to tell you what's
+				// happening") -- capping generation length bounds worst-case
+				// latency for the same reason, not just output style.
+				maxTokens: 300,
+				// Root cause of most of the remaining latency, found by testing
+				// this agent's exact tool schemas directly against the Anthropic
+				// API: attaching tool definitions makes Claude Sonnet 5 silently
+				// engage extended thinking, even though nothing requests it --
+				// measured 4.24s vs 1.57s for an identical call with thinking
+				// explicitly disabled, a ~63% cut. The plugin's LLMOptions type
+				// doesn't expose `thinking` (it only forwards `temperature` this
+				// way), so this field only reaches the API because
+				// scripts/patchAnthropicPlugin.js (run on every `npm install`
+				// via postinstall) patches the plugin to forward it too -- the
+				// `as any` below is because the official type doesn't know about
+				// the field the patch adds.
+				thinking: { type: "disabled" },
+			} as any),
 			tts: new ElevenLabsTTS({
 				apiKey: process.env.ELEVENLABS_API_KEY,
 				voiceId: process.env.ELEVENLABS_VOICE_ID || DEFAULT_ELEVENLABS_VOICE_ID,
+				// eleven_flash_v2_5 is ElevenLabs' lowest-latency model,
+				// specifically built for real-time conversational use --
+				// trades a little naturalness for speed, worth it given how
+				// severe the measured end-to-end latency has been.
+				model: "eleven_flash_v2_5",
 			}),
 			// Verified live against a real call: the default 500ms endpointing
 			// minDelay was too tight for this pipeline (cloud STT + cloud turn
@@ -74,11 +97,39 @@ export default defineAgent({
 			// invalidated nearly every preemptive attempt in the test call's
 			// logs. For a distress line, a reliably complete reply a few
 			// hundred ms later beats a faster one that stutters and restarts.
+			// Verified live against a second real call: the caller answered
+			// "Yes" to the opening question and heard nothing back. The
+			// transcript showed why -- while the agent's reply was still being
+			// generated/spoken, the caller kept talking ("Yes.", "Surplus.",
+			// "Too slow.", "No."), and interruption.minWords defaults to 0 --
+			// meaning any utterance at all, even a single short word, counts
+			// as a genuine interruption and cancels the in-flight response.
+			// Each cancellation restarted generation, which the next short
+			// utterance cancelled again, forever -- the agent never got a
+			// single word out. mode: 'adaptive' uses ML-based detection to
+			// tell a real interruption from a brief backchannel-style
+			// utterance and let the latter pass without cancelling the
+			// agent's turn -- deliberately NOT raising minWords instead,
+			// which would risk the opposite failure: a caller's genuinely
+			// urgent one-word interruption ("Help!") failing to interrupt.
 			turnHandling: {
 				turnDetection: new inference.TurnDetector(),
 				endpointing: { minDelay: 900, maxDelay: 4000 },
 				preemptiveGeneration: { enabled: false },
+				interruption: { mode: "adaptive" },
 			},
+		});
+
+		// Temporary diagnostic instrumentation -- the pipeline's end-to-end
+		// latency has been measured at 11-28s per turn in real calls, but a
+		// direct Anthropic API call with the real system prompt takes ~2.6s,
+		// which rules out prompt length/LLM reasoning time as the dominant
+		// cause. This logs the framework's own per-stage metrics (STT
+		// duration, LLM time-to-first-token, TTS time-to-first-byte) so the
+		// next real call shows exactly which stage the other 10-25s is
+		// actually going, instead of guessing further.
+		session.on(AgentSessionEventTypes.MetricsCollected, (ev) => {
+			console.log("LATENCY_METRIC", JSON.stringify(ev.metrics));
 		});
 
 		try {
