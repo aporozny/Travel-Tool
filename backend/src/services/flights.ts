@@ -37,15 +37,69 @@ export interface FlightSearchParams {
 	cabinClass?: "economy" | "premium_economy" | "business" | "first";
 }
 
+export interface FlightSegmentView {
+	marketingCarrier: string;
+	flightNumber: string;
+	departingAt: string;
+	arrivingAt: string;
+}
+
+export interface FlightSliceView {
+	originAirport: string;
+	originCity: string | null;
+	destinationAirport: string;
+	destinationCity: string | null;
+	departingAt: string;
+	arrivingAt: string;
+	durationMinutes: number | null;
+	stops: number;
+	segments: FlightSegmentView[];
+}
+
 export interface FlightOfferView {
 	id: string;
 	airline: string;
 	airlineLogoUrl: string | null;
-	slices: unknown[]; // raw Duffel slices -- see flight_offers_cache.slices comment; not worth flattening for display purposes yet
+	slices: FlightSliceView[];
 	baseAmount: number;
+	taxAmount: number;
 	totalAmount: number; // includes Drift's markup
 	currency: string;
 	expiresAt: string;
+}
+
+// "PT14H30M" -> 870. Duffel returns ISO 8601 durations; nothing in this
+// codebase already parses them, and pulling in a library for one regex
+// felt like overkill.
+function parseIsoDurationMinutes(iso: string | null): number | null {
+	if (!iso) return null;
+	const match = iso.match(/PT(?:(\d+)H)?(?:(\d+)M)?/);
+	if (!match) return null;
+	const hours = match[1] ? parseInt(match[1], 10) : 0;
+	const minutes = match[2] ? parseInt(match[2], 10) : 0;
+	return hours * 60 + minutes;
+}
+
+function toSliceView(slice: Offer["slices"][number]): FlightSliceView {
+	const segments = slice.segments ?? [];
+	const first = segments[0];
+	const last = segments[segments.length - 1];
+	return {
+		originAirport: slice.origin?.iata_code ?? "",
+		originCity: (slice.origin as any)?.city_name ?? (slice.origin as any)?.city?.name ?? null,
+		destinationAirport: slice.destination?.iata_code ?? "",
+		destinationCity: (slice.destination as any)?.city_name ?? (slice.destination as any)?.city?.name ?? null,
+		departingAt: first?.departing_at ?? "",
+		arrivingAt: last?.arriving_at ?? "",
+		durationMinutes: parseIsoDurationMinutes(slice.duration),
+		stops: Math.max(0, segments.length - 1),
+		segments: segments.map((seg) => ({
+			marketingCarrier: seg.marketing_carrier?.name ?? seg.operating_carrier?.name ?? "Unknown",
+			flightNumber: seg.marketing_carrier_flight_number ?? "",
+			departingAt: seg.departing_at,
+			arrivingAt: seg.arriving_at,
+		})),
+	};
 }
 
 function searchKeyFor(params: FlightSearchParams): string {
@@ -89,8 +143,9 @@ function toOfferView(offer: Omit<Offer, "available_services">, markedUpTotal: nu
 		id: offer.id,
 		airline: offer.owner?.name ?? "Unknown airline",
 		airlineLogoUrl: offer.owner?.logo_symbol_url ?? null,
-		slices: offer.slices,
+		slices: (offer.slices ?? []).map(toSliceView),
 		baseAmount: parseFloat(offer.base_amount),
+		taxAmount: offer.tax_amount ? parseFloat(offer.tax_amount) : 0,
 		totalAmount: markedUpTotal,
 		currency: offer.total_currency,
 		expiresAt: offer.expires_at,
