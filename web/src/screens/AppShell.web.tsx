@@ -11,8 +11,9 @@ import DashboardScreen from './DashboardScreen.web';
 import MembersScreen from './MembersScreen.web';
 import MessagesScreen from './MessagesScreen.web';
 import CommunityScreen from './CommunityScreen.web';
+import TripsScreen from './TripsScreen.web';
 
-type Tab = 'explore' | 'community' | 'bookings' | 'safety' | 'profile' | 'dashboard' | 'members' | 'messages';
+type Tab = 'explore' | 'community' | 'trips' | 'bookings' | 'safety' | 'profile' | 'dashboard' | 'members' | 'messages';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const C = {
@@ -68,6 +69,7 @@ export default function AppShell() {
     : [
         { key: 'community', label: 'Feed',       icon: '◈' },
         { key: 'explore',   label: 'Explore',    icon: '◎' },
+        { key: 'trips',     label: 'Trips',      icon: '✈' },
         { key: 'members',   label: 'Members',    icon: '◉', badge: pendingConnections },
         { key: 'messages',  label: 'Messages',   icon: '◇', badge: unreadMessages },
         { key: 'bookings',  label: 'Bookings',   icon: '◆' },
@@ -78,6 +80,7 @@ export default function AppShell() {
   const renderContent = () => {
     switch (tab) {
       case 'community': return <CommunityScreen />;
+      case 'trips':     return <TripsScreen />;
       case 'explore':   return <ExploreScreen onSelectOperator={(op: any) => setDetail({ type: 'operator', data: op })} detail={detail} onClearDetail={() => setDetail(null)} />;
       case 'bookings':  return <BookingsScreen />;
       case 'safety':    return <SafetyScreen />;
