@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useDispatch } from 'react-redux';
 import { AppDispatch } from '../store';
+import useIsMobile from '../hooks/useIsMobile.web';
 
 interface Props {
   onJoin: () => void;
@@ -38,7 +39,22 @@ function Step({ number, title, body }: { number: string; title: string; body: st
   );
 }
 
+// Mobile overrides -- kept separate from the static `s`/`vp`/`step` style
+// objects below (module-scope, can't see `isMobile`) rather than turning
+// those into a function; smaller diff, same effect via spread-at-usage.
+const mobile: Record<string, React.CSSProperties> = {
+  sectionPad: { padding: '48px 20px' },
+  hero: { flexWrap: 'wrap', gap: 32, padding: '48px 20px 40px' },
+  heroVisual: { flex: '1 1 auto', width: '100%' },
+  heroTitle: { fontSize: 40, letterSpacing: -1 },
+  problemTitle: { fontSize: 26 },
+  sectionTitle: { fontSize: 24 },
+  finalTitle: { fontSize: 28 },
+  operatorInner: { padding: '48px 20px' },
+};
+
 export default function LandingScreen({ onJoin, onLogin }: Props) {
+  const isMobile = useIsMobile();
   const [stats, setStats] = useState({ members: '—', operators: '—', regions: '—' });
 
   const [liveDestinations, setLiveDestinations] = useState<{ region: string; country: string }[]>([]);
@@ -76,12 +92,12 @@ export default function LandingScreen({ onJoin, onLogin }: Props) {
       </nav>
 
       {/* Hero */}
-      <section style={s.hero}>
+      <section style={{ ...s.hero, ...(isMobile ? mobile.hero : {}) }}>
         <div style={s.heroInner}>
           <p style={s.heroEyebrow}>
             {stats.regions !== '—' ? `Live in ${stats.regions} destinations worldwide` : 'Now open worldwide'}
           </p>
-          <h1 style={s.heroTitle}>Travel with<br />better people.</h1>
+          <h1 style={{ ...s.heroTitle, ...(isMobile ? mobile.heroTitle : {}) }}>Travel with<br />better people.</h1>
           <p style={s.heroSub}>
             Drift is a community for travellers who go deeper.
             Better operators. Real local knowledge. People who actually know the place.
@@ -91,7 +107,7 @@ export default function LandingScreen({ onJoin, onLogin }: Props) {
             <button style={s.ghostBtn} onClick={onLogin}>Already a member</button>
           </div>
         </div>
-        <div style={s.heroVisual}>
+        <div style={{ ...s.heroVisual, ...(isMobile ? mobile.heroVisual : {}) }}>
           <div style={s.heroCard}>
             <div style={s.heroCardTop}>
               <div style={s.heroCardAvatar}>A</div>
@@ -127,9 +143,9 @@ export default function LandingScreen({ onJoin, onLogin }: Props) {
       </section>
 
       {/* Problem */}
-      <section style={s.problem}>
-        <div style={s.sectionInner}>
-          <h2 style={s.problemTitle}>
+      <section style={{ ...s.problem, ...(isMobile ? mobile.sectionPad : {}) }}>
+        <div style={{ ...s.sectionInner, ...(isMobile ? mobile.sectionPad : {}) }}>
+          <h2 style={{ ...s.problemTitle, ...(isMobile ? mobile.problemTitle : {}) }}>
             Most travel platforms show you<br />what everyone else sees.
           </h2>
           <p style={s.problemBody}>
@@ -146,8 +162,8 @@ export default function LandingScreen({ onJoin, onLogin }: Props) {
 
       {/* Value props */}
       <section style={s.props}>
-        <div style={s.sectionInner}>
-          <h2 style={s.sectionTitle}>What makes Drift different</h2>
+        <div style={{ ...s.sectionInner, ...(isMobile ? mobile.sectionPad : {}) }}>
+          <h2 style={{ ...s.sectionTitle, ...(isMobile ? mobile.sectionTitle : {}) }}>What makes Drift different</h2>
           <div style={vp.grid}>
             <ValueProp
               icon="01"
@@ -170,8 +186,8 @@ export default function LandingScreen({ onJoin, onLogin }: Props) {
 
       {/* How it works */}
       <section style={s.how}>
-        <div style={s.sectionInner}>
-          <h2 style={s.sectionTitle}>How it works</h2>
+        <div style={{ ...s.sectionInner, ...(isMobile ? mobile.sectionPad : {}) }}>
+          <h2 style={{ ...s.sectionTitle, ...(isMobile ? mobile.sectionTitle : {}) }}>How it works</h2>
           <div style={s.howGrid}>
             <Step
               number="01"
@@ -197,8 +213,8 @@ export default function LandingScreen({ onJoin, onLogin }: Props) {
           the team gets held to long after coverage has actually changed. */}
       {liveDestinations.length > 0 && (
         <section style={s.destinations}>
-          <div style={s.sectionInner}>
-            <h2 style={s.sectionTitle}>Where travellers are exploring</h2>
+          <div style={{ ...s.sectionInner, ...(isMobile ? mobile.sectionPad : {}) }}>
+            <h2 style={{ ...s.sectionTitle, ...(isMobile ? mobile.sectionTitle : {}) }}>Where travellers are exploring</h2>
             <p style={s.destinationSub}>
               Real, live coverage worldwide -- not a fixed list. Search any city,
               island or town and Drift builds real coverage there on demand.
@@ -220,7 +236,7 @@ export default function LandingScreen({ onJoin, onLogin }: Props) {
 
       {/* Operator CTA */}
       <section style={s.operator}>
-        <div style={s.operatorInner}>
+        <div style={{ ...s.operatorInner, ...(isMobile ? mobile.operatorInner : {}) }}>
           <div style={s.operatorText}>
             <h2 style={s.operatorTitle}>Are you an operator?</h2>
             <p style={s.operatorBody}>
@@ -249,8 +265,8 @@ export default function LandingScreen({ onJoin, onLogin }: Props) {
 
       {/* Final CTA */}
       <section style={s.finalCta}>
-        <div style={s.sectionInner}>
-          <h2 style={s.finalTitle}>Travel with better people.</h2>
+        <div style={{ ...s.sectionInner, ...(isMobile ? mobile.sectionPad : {}) }}>
+          <h2 style={{ ...s.finalTitle, ...(isMobile ? mobile.finalTitle : {}) }}>Travel with better people.</h2>
           <p style={s.finalSub}>Join Drift. Free, always.</p>
           <button style={s.primaryBtn} onClick={onJoin}>Get started</button>
         </div>

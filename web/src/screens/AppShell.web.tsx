@@ -13,6 +13,7 @@ import MessagesScreen from './MessagesScreen.web';
 import CommunityScreen from './CommunityScreen.web';
 import TripsScreen from './TripsScreen.web';
 import FlightsScreen from './FlightsScreen.web';
+import useIsMobile from '../hooks/useIsMobile.web';
 
 type Tab = 'explore' | 'community' | 'trips' | 'flights' | 'bookings' | 'safety' | 'profile' | 'dashboard' | 'members' | 'messages';
 
@@ -40,6 +41,8 @@ export default function AppShell() {
   const [detail, setDetail] = useState<any>(null);
   const [pendingConnections, setPendingConnections] = useState(0);
   const [unreadMessages, setUnreadMessages] = useState(0);
+  const isMobile = useIsMobile();
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
   React.useEffect(() => {
     if (user?.role !== 'traveler') return;
@@ -96,8 +99,39 @@ export default function AppShell() {
   };
 
   return (
-    <div style={styles.shell}>
-      <aside style={styles.sidebar}>
+    <div style={{ ...styles.shell, flexDirection: isMobile ? 'column' : 'row' }}>
+      {isMobile && (
+        <header style={styles.mobileHeader}>
+          <button
+            style={styles.hamburgerBtn}
+            onClick={() => setDrawerOpen(o => !o)}
+            aria-label="Menu"
+          >
+            <span style={styles.hamburgerIcon}>☰</span>
+          </button>
+          <div style={styles.mobileHeaderLogo}>
+            <span style={styles.logoMark}>◈</span>
+            <span style={styles.logoText}>Drift</span>
+          </div>
+          <div style={{ width: 36 }} />
+        </header>
+      )}
+
+      {isMobile && drawerOpen && (
+        <div style={styles.backdrop} onClick={() => setDrawerOpen(false)} />
+      )}
+
+      <aside
+        style={
+          isMobile
+            ? {
+                ...styles.sidebar,
+                ...styles.sidebarMobile,
+                left: drawerOpen ? 0 : -260,
+              }
+            : styles.sidebar
+        }
+      >
         {/* Logo */}
         <div style={styles.logo}>
           <span style={styles.logoMark}>◈</span>
@@ -113,7 +147,7 @@ export default function AppShell() {
                 ...styles.navItem,
                 ...(tab === item.key ? styles.navItemActive : {}),
               }}
-              onClick={() => { setTab(item.key); setDetail(null); }}
+              onClick={() => { setTab(item.key); setDetail(null); setDrawerOpen(false); }}
             >
               <span style={{
                 ...styles.navIcon,
@@ -128,7 +162,7 @@ export default function AppShell() {
             </button>
           ))}
           {isAdmin && (
-            <button style={styles.navItem} onClick={() => window.open('/admin.html', '_blank')}>
+            <button style={styles.navItem} onClick={() => { window.open('/admin.html', '_blank'); setDrawerOpen(false); }}>
               <span style={{ ...styles.navIcon, color: C.muted }}>⚙</span>
               <span style={{ color: C.muted }}>Admin</span>
             </button>
@@ -170,6 +204,62 @@ const styles: Record<string, React.CSSProperties> = {
     flexDirection: 'column',
     padding: '0',
     flexShrink: 0,
+  },
+
+  mobileHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    height: 56,
+    padding: '0 12px',
+    background: C.sidebar,
+    borderBottom: `1px solid ${C.border}`,
+    flexShrink: 0,
+    position: 'sticky',
+    top: 0,
+    zIndex: 20,
+  },
+  hamburgerBtn: {
+    width: 36,
+    height: 36,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    border: 'none',
+    background: 'transparent',
+    cursor: 'pointer',
+    borderRadius: 8,
+    flexShrink: 0,
+  },
+  hamburgerIcon: {
+    fontSize: 20,
+    color: C.text,
+    lineHeight: 1,
+  },
+  mobileHeaderLogo: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+  },
+  backdrop: {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    background: 'rgba(0,0,0,0.35)',
+    zIndex: 29,
+  },
+  sidebarMobile: {
+    position: 'fixed',
+    top: 0,
+    bottom: 0,
+    width: 260,
+    maxWidth: '82vw',
+    zIndex: 30,
+    boxShadow: '2px 0 16px rgba(0,0,0,0.15)',
+    transition: 'left 0.22s ease',
+    overflowY: 'auto',
   },
 
   logo: {
