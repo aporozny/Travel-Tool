@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import api from '../services/api.web';
+import { DuffelPayments } from '@duffel/components';
 
 // ─── Design tokens ─────────────────────────────────────────────────────────
 // Matches TripsScreen.web.tsx / CommunityScreen.web.tsx / AppShell.web.tsx.
@@ -34,16 +35,35 @@ interface FlightSlice {
   segments: FlightSegment[];
 }
 
+interface FlightOfferPassenger {
+  id: string;
+  type: string | null;
+  age: number | null;
+}
+
 interface FlightOffer {
   id: string;
   airline: string;
   airlineLogoUrl: string | null;
   slices: FlightSlice[];
+  passengers: FlightOfferPassenger[];
   baseAmount: number;
   taxAmount: number;
   totalAmount: number;
   currency: string;
   expiresAt: string;
+}
+
+interface PassengerForm {
+  id: string;
+  type: string | null;
+  title: 'mr' | 'ms' | 'mrs' | 'miss';
+  gender: 'm' | 'f';
+  givenName: string;
+  familyName: string;
+  bornOn: string;
+  email: string;
+  phoneNumber: string;
 }
 
 function formatDuration(minutes: number | null): string {
@@ -63,6 +83,151 @@ function formatStops(stops: number): string {
   return `${stops} stop${stops > 1 ? 's' : ''}`;
 }
 
+// Checkout: Payment Intent -> Balance -> Order (see RISK-REGISTER.md R12).
+// Duffel's own hosted DuffelCardForm collects the card -- raw card data
+// never reaches Drift's servers. The client_token from creating the
+// Payment Intent is passed as `clientKey`; submitting the form charges
+// that specific Payment Intent, which the backend then confirms and
+// spends from Drift's Balance to place the actual order.
+function CheckoutModal({
+  offer,
+  onClose,
+  onBooked,
+}: {
+  offer: FlightOffer;
+  onClose: () => void;
+  onBooked: (booking: { bookingReference: string }) => void;
+}) {
+  const [step, setStep] = useState<'passengers' | 'payment' | 'submitting'>('passengers');
+  const [passengers, setPassengers] = useState<PassengerForm[]>(
+    offer.passengers.map((p) => ({
+      id: p.id,
+      type: p.type,
+      title: 'mr',
+      gender: 'm',
+      givenName: '',
+      familyName: '',
+      bornOn: '',
+      email: '',
+      phoneNumber: '',
+    }))
+  );
+  const [paymentIntent, setPaymentIntent] = useState<{ id: string; clientToken: string; amount: string; currency: string } | null>(null);
+  const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  const updatePassenger = (idx: number, field: keyof PassengerForm, value: string) => {
+    setPassengers((prev) => prev.map((p, i) => (i === idx ? { ...p, [field]: value } : p)));
+  };
+
+  const passengersValid = passengers.every((p) => p.givenName && p.familyName && p.bornOn && p.email && p.phoneNumber);
+
+  const handleContinueToPayment = async () => {
+    setError('');
+    setSubmitting(true);
+    try {
+      const res = await api.post('/flights/payment-intents', { offerId: offer.id });
+      setPaymentIntent(res.data);
+      setStep('payment');
+    } catch (err: any) {
+      setError(err?.response?.data?.message || 'Could not start payment.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleCardSuccess = async () => {
+    if (!paymentIntent) return;
+    setStep('submitting');
+    setError('');
+    try {
+      await api.post('/flights/payment-intents/confirm', { paymentIntentId: paymentIntent.id });
+      const res = await api.post('/flights/orders', {
+        offerId: offer.id,
+        paymentIntentId: paymentIntent.id,
+        passengers: passengers.map((p) => ({
+          id: p.id,
+          title: p.title,
+          gender: p.gender,
+          givenName: p.givenName,
+          familyName: p.familyName,
+          bornOn: p.bornOn,
+          email: p.email,
+          phoneNumber: p.phoneNumber,
+        })),
+      });
+      onBooked(res.data);
+    } catch (err: any) {
+      setError(err?.response?.data?.message || 'Could not complete booking -- your card was charged, contact support with this reference: ' + paymentIntent.id);
+      setStep('payment');
+    }
+  };
+
+  const handleCardFailure = (cardErr: any) => {
+    setError(cardErr?.message || 'Card was declined. Try a different card.');
+  };
+
+  return (
+    <div style={cs.overlay} onClick={onClose}>
+      <div style={cs.modal} onClick={(e) => e.stopPropagation()}>
+        <div style={cs.modalHeader}>
+          <h2 style={cs.modalTitle}>{step === 'passengers' ? 'Passenger details' : 'Payment'}</h2>
+          <button style={cs.closeBtn} onClick={onClose}>✕</button>
+        </div>
+
+        {error && <div style={s.error}>{error}</div>}
+
+        {step === 'passengers' && (
+          <>
+            {passengers.map((p, idx) => (
+              <div key={p.id} style={cs.passengerBlock}>
+                <p style={cs.passengerLabel}>Passenger {idx + 1} ({p.type || 'adult'})</p>
+                <div style={cs.passengerRow}>
+                  <select style={s.input} value={p.title} onChange={(e) => updatePassenger(idx, 'title', e.target.value)}>
+                    <option value="mr">Mr</option>
+                    <option value="ms">Ms</option>
+                    <option value="mrs">Mrs</option>
+                    <option value="miss">Miss</option>
+                  </select>
+                  <select style={s.input} value={p.gender} onChange={(e) => updatePassenger(idx, 'gender', e.target.value)}>
+                    <option value="m">Male</option>
+                    <option value="f">Female</option>
+                  </select>
+                </div>
+                <div style={cs.passengerRow}>
+                  <input style={s.input} placeholder="Given name" value={p.givenName} onChange={(e) => updatePassenger(idx, 'givenName', e.target.value)} />
+                  <input style={s.input} placeholder="Family name" value={p.familyName} onChange={(e) => updatePassenger(idx, 'familyName', e.target.value)} />
+                </div>
+                <div style={cs.passengerRow}>
+                  <input style={s.input} type="date" value={p.bornOn} onChange={(e) => updatePassenger(idx, 'bornOn', e.target.value)} />
+                  <input style={s.input} type="email" placeholder="Email" value={p.email} onChange={(e) => updatePassenger(idx, 'email', e.target.value)} />
+                </div>
+                <input style={s.input} placeholder="Phone, e.g. +61412345678" value={p.phoneNumber} onChange={(e) => updatePassenger(idx, 'phoneNumber', e.target.value)} />
+              </div>
+            ))}
+            <button style={s.searchBtn} disabled={!passengersValid || submitting} onClick={handleContinueToPayment}>
+              {submitting ? 'Loading...' : `Continue to payment -- $${offer.totalAmount.toFixed(2)} ${offer.currency}`}
+            </button>
+          </>
+        )}
+
+        {step === 'payment' && paymentIntent && (
+          <>
+            <p style={s.muted}>Charging ${paymentIntent.amount} {paymentIntent.currency}</p>
+            <DuffelPayments
+              paymentIntentClientToken={paymentIntent.clientToken}
+              onSuccessfulPayment={handleCardSuccess}
+              onFailedPayment={handleCardFailure}
+            />
+          </>
+        )}
+
+        {step === 'submitting' && <p style={s.muted}>Booking your flight...</p>}
+      </div>
+    </div>
+  );
+}
+
 export default function FlightsScreen() {
   const [origin, setOrigin] = useState('');
   const [destination, setDestination] = useState('');
@@ -75,6 +240,8 @@ export default function FlightsScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [searched, setSearched] = useState(false);
+  const [checkoutOffer, setCheckoutOffer] = useState<FlightOffer | null>(null);
+  const [booking, setBooking] = useState<{ bookingReference: string } | null>(null);
 
   const handleSearch = async () => {
     if (origin.length !== 3 || destination.length !== 3) {
@@ -112,7 +279,7 @@ export default function FlightsScreen() {
     <div style={s.page}>
       <div style={s.header}>
         <h1 style={s.title}>Flights</h1>
-        <p style={s.subtitle}>Search real fares. Booking is coming soon -- for now, this shows you what's available and what it costs.</p>
+        <p style={s.subtitle}>Search real fares and book directly.</p>
       </div>
 
       <div style={s.searchCard}>
@@ -154,6 +321,12 @@ export default function FlightsScreen() {
 
       {error && <div style={s.error}>{error}</div>}
 
+      {booking && (
+        <div style={s.confirmation}>
+          Booked! Your confirmation code is <strong>{booking.bookingReference}</strong>.
+        </div>
+      )}
+
       {searched && !loading && offers && offers.length === 0 && !error && (
         <p style={s.muted}>No flights found for that search.</p>
       )}
@@ -186,10 +359,21 @@ export default function FlightsScreen() {
                 </div>
               ))}
 
-              <p style={s.disclosure}>Fare shown includes Drift's booking fee. Booking isn't available yet.</p>
+              <p style={s.disclosure}>Fare shown includes Drift's booking fee.</p>
+              <button style={s.bookBtn} onClick={() => { setBooking(null); setCheckoutOffer(offer); }}>
+                Book this flight
+              </button>
             </div>
           ))}
         </div>
+      )}
+
+      {checkoutOffer && (
+        <CheckoutModal
+          offer={checkoutOffer}
+          onClose={() => setCheckoutOffer(null)}
+          onBooked={(b) => { setBooking(b); setCheckoutOffer(null); }}
+        />
       )}
     </div>
   );
@@ -223,4 +407,17 @@ const s: Record<string, React.CSSProperties> = {
   sliceMiddle: { flex: 1, display: 'flex', flexDirection: 'column' as const, alignItems: 'center', gap: 4 },
   sliceLine: { width: '100%', height: 1, background: C.border },
   disclosure: { fontSize: 11, color: C.muted, marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}` },
+  bookBtn: { marginTop: 10, width: '100%', padding: '11px 22px', background: C.gold, color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: 'pointer' },
+  confirmation: { background: '#E8F5E9', color: '#2E7D32', padding: '12px 16px', borderRadius: 8, marginBottom: 16, fontSize: 14 },
+};
+
+const cs: Record<string, React.CSSProperties> = {
+  overlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: 20 },
+  modal: { background: C.white, borderRadius: 16, padding: 24, width: '100%', maxWidth: 480, maxHeight: '85vh', overflowY: 'auto' as const },
+  modalHeader: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
+  modalTitle: { fontSize: 18, fontWeight: 700, color: C.text, margin: 0, fontFamily: "'DM Serif Display', serif" },
+  closeBtn: { background: 'none', border: 'none', fontSize: 16, color: C.muted, cursor: 'pointer', padding: 4 },
+  passengerBlock: { marginBottom: 16, paddingBottom: 16, borderBottom: `1px solid ${C.border}` },
+  passengerLabel: { fontSize: 12, fontWeight: 600, color: C.muted, textTransform: 'uppercase' as const, letterSpacing: '0.4px', marginBottom: 8 },
+  passengerRow: { display: 'flex', gap: 10, marginBottom: 10 },
 };

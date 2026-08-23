@@ -56,11 +56,18 @@ export interface FlightSliceView {
 	segments: FlightSegmentView[];
 }
 
+export interface FlightOfferPassengerView {
+	id: string;
+	type: string | null;
+	age: number | null;
+}
+
 export interface FlightOfferView {
 	id: string;
 	airline: string;
 	airlineLogoUrl: string | null;
 	slices: FlightSliceView[];
+	passengers: FlightOfferPassengerView[];
 	baseAmount: number;
 	taxAmount: number;
 	totalAmount: number; // includes Drift's markup
@@ -119,18 +126,37 @@ function searchKeyFor(params: FlightSearchParams): string {
 // aren't selected here yet, since no product decision on differentiated
 // pricing has been made (see markup_rules' seed row: 8%, $5-150 cap,
 // explicitly a placeholder).
-async function applyMarkup(baseAmount: number): Promise<{ totalAmount: number; markupAmount: number; ruleId: string }> {
+interface MarkupRule {
+	id: string;
+	markup_type: string;
+	markup_value: string;
+	min_fee: string | null;
+	max_fee: string | null;
+}
+
+async function getActiveMarkupRule(): Promise<MarkupRule> {
 	const { rows } = await pool.query(
 		`SELECT id, markup_type, markup_value, min_fee, max_fee FROM markup_rules WHERE scope = 'global' AND active = true LIMIT 1`
 	);
 	if (!rows.length) throw new Error("No active global markup_rules row -- flight pricing cannot be calculated");
-	const rule = rows[0];
+	return rows[0];
+}
 
+function computeMarkup(baseAmount: number, rule: MarkupRule): { totalAmount: number; markupAmount: number; ruleId: string } {
 	let markupAmount = rule.markup_type === "percentage" ? baseAmount * parseFloat(rule.markup_value) : parseFloat(rule.markup_value);
 	if (rule.min_fee != null) markupAmount = Math.max(markupAmount, parseFloat(rule.min_fee));
 	if (rule.max_fee != null) markupAmount = Math.min(markupAmount, parseFloat(rule.max_fee));
-
 	return { totalAmount: baseAmount + markupAmount, markupAmount, ruleId: rule.id };
+}
+
+// Single-offer convenience wrapper for the checkout call sites below, which
+// only ever price one offer at a time. searchFlights() below deliberately
+// does NOT use this -- fetching the rule fresh per offer in a loop of
+// potentially dozens of offers was the actual cause of ~20s search times
+// (N sequential DB round trips); it fetches the rule once instead.
+async function applyMarkup(baseAmount: number): Promise<{ totalAmount: number; markupAmount: number; ruleId: string }> {
+	const rule = await getActiveMarkupRule();
+	return computeMarkup(baseAmount, rule);
 }
 
 // The offers returned inline on an OfferRequest are typed
@@ -144,6 +170,7 @@ function toOfferView(offer: Omit<Offer, "available_services">, markedUpTotal: nu
 		airline: offer.owner?.name ?? "Unknown airline",
 		airlineLogoUrl: offer.owner?.logo_symbol_url ?? null,
 		slices: (offer.slices ?? []).map(toSliceView),
+		passengers: (offer.passengers ?? []).map((p) => ({ id: p.id, type: p.type, age: p.age })),
 		baseAmount: parseFloat(offer.base_amount),
 		taxAmount: offer.tax_amount ? parseFloat(offer.tax_amount) : 0,
 		totalAmount: markedUpTotal,
@@ -179,49 +206,53 @@ export async function searchFlights(params: FlightSearchParams): Promise<FlightO
 	});
 
 	const offers = "offers" in response.data ? response.data.offers : [];
-	const views: FlightOfferView[] = [];
 
-	for (const offer of offers) {
-		const baseAmount = parseFloat(offer.base_amount);
-		const taxAmount = offer.tax_amount ? parseFloat(offer.tax_amount) : 0;
-		const { totalAmount, markupAmount, ruleId } = await applyMarkup(baseAmount + taxAmount);
+	// Fetch the markup rule once, not once per offer (see comment on
+	// applyMarkup above) -- markupAmount/ruleId aren't persisted at
+	// search time regardless; they get resnapshotted at order creation,
+	// since the markup that matters is the one active when the traveler
+	// actually books, not when they searched.
+	const rule = await getActiveMarkupRule();
 
-		await pool.query(
-			`INSERT INTO flight_offers_cache
-			   (search_key, duffel_offer_id, duffel_offer_request_id, slices, passenger_types, cabin_class,
-			    base_amount, base_currency, tax_amount, total_amount, total_currency, fare_conditions,
-			    owner_airline_iata, expires_at, raw_response)
-			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-			 ON CONFLICT (duffel_offer_id) DO UPDATE SET fetched_at = NOW()`,
-			[
-				searchKey,
-				offer.id,
-				response.data.id,
-				JSON.stringify(offer.slices),
-				JSON.stringify(offer.passengers),
-				params.cabinClass ?? "economy",
-				baseAmount,
-				offer.base_currency,
-				taxAmount,
-				offer.total_amount,
-				offer.total_currency,
-				JSON.stringify(offer.conditions ?? null),
-				offer.owner?.iata_code ?? null,
-				offer.expires_at,
-				JSON.stringify(offer),
-			]
-		);
+	// Independent per-offer cache writes -- run concurrently instead of
+	// one at a time. With Duffel test mode routinely returning dozens of
+	// offers, sequential awaits here were the actual cause of ~20s
+	// search times.
+	const views = await Promise.all(
+		offers.map(async (offer) => {
+			const baseAmount = parseFloat(offer.base_amount);
+			const taxAmount = offer.tax_amount ? parseFloat(offer.tax_amount) : 0;
+			const { totalAmount } = computeMarkup(baseAmount + taxAmount, rule);
 
-		// markupAmount/ruleId are computed per-offer above but not yet
-		// persisted at search time -- they get resnapshotted at order
-		// creation (see createFlightOrder, not yet implemented), since
-		// the markup that matters is the one active when the traveler
-		// actually books, not when they searched.
-		void markupAmount;
-		void ruleId;
+			await pool.query(
+				`INSERT INTO flight_offers_cache
+				   (search_key, duffel_offer_id, duffel_offer_request_id, slices, passenger_types, cabin_class,
+				    base_amount, base_currency, tax_amount, total_amount, total_currency, fare_conditions,
+				    owner_airline_iata, expires_at, raw_response)
+				 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+				 ON CONFLICT (duffel_offer_id) DO UPDATE SET fetched_at = NOW()`,
+				[
+					searchKey,
+					offer.id,
+					response.data.id,
+					JSON.stringify(offer.slices),
+					JSON.stringify(offer.passengers),
+					params.cabinClass ?? "economy",
+					baseAmount,
+					offer.base_currency,
+					taxAmount,
+					offer.total_amount,
+					offer.total_currency,
+					JSON.stringify(offer.conditions ?? null),
+					offer.owner?.iata_code ?? null,
+					offer.expires_at,
+					JSON.stringify(offer),
+				]
+			);
 
-		views.push(toOfferView(offer, totalAmount));
-	}
+			return toOfferView(offer, totalAmount);
+		})
+	);
 
 	return views;
 }
@@ -237,11 +268,148 @@ export async function reverifyOffer(duffelOfferId: string): Promise<Offer> {
 	return response.data;
 }
 
-// TODO (next phase, blocked on a payment architecture decision, not a
-// technical unknown): createFlightOrder(offerId, passengers, paymentRef).
-// Per the Duffel API research, this needs Duffel's hosted card-payment
-// component so raw card data never touches Drift's servers (keeps PCI
-// scope to SAQ-A) -- the order-creation call itself
-// (duffel.orders.create) is straightforward once that's wired in.
-// Passenger data must be written to flight_order_passengers with
-// passport_number_enc via pgcrypto, never plaintext, never logged.
+// Checkout: Payment Intent -> Balance -> Order. Chosen over the other two
+// Duffel payment methods after reading their docs directly (see
+// RISK-REGISTER.md R12) -- plain Card passthrough forbids any markup
+// (must charge the exact supplier price), and plain pre-funded Balance
+// would require Drift to run its own separate Stripe-style processor to
+// charge the traveler. Payment Intents let Duffel's own hosted card form
+// charge the traveler the marked-up total directly, crediting Drift's
+// Balance (minus Duffel's processing fee) before the order is placed --
+// so raw card data never touches Drift's servers (PCI scope stays SAQ-A)
+// and no second payment processor is needed.
+
+export interface PaymentIntentView {
+	id: string;
+	clientToken: string;
+	amount: string;
+	currency: string;
+	status: string | null;
+}
+
+// Amount charged to the traveler's card -- the marked-up total, not
+// Duffel's raw price. Re-verifies the offer first since prices/expiry
+// are live at Duffel, never trusted from the search-time cache.
+export async function createCheckoutPaymentIntent(duffelOfferId: string): Promise<PaymentIntentView> {
+	const duffel = getClient();
+	const offer = await reverifyOffer(duffelOfferId);
+	if (new Date(offer.expires_at) < new Date()) {
+		throw new Error("This fare has expired -- please search again");
+	}
+	const baseAmount = parseFloat(offer.base_amount) + (offer.tax_amount ? parseFloat(offer.tax_amount) : 0);
+	const { totalAmount } = await applyMarkup(baseAmount);
+
+	const response = await duffel.paymentIntents.create({
+		amount: totalAmount.toFixed(2),
+		currency: offer.total_currency,
+	});
+	return {
+		id: response.data.id,
+		clientToken: response.data.client_token,
+		amount: response.data.amount,
+		currency: response.data.currency,
+		status: response.data.status,
+	};
+}
+
+// Called once the traveler has submitted their card via Duffel's hosted
+// DuffelCardForm component (client-side, using this Payment Intent's
+// client_token) -- confirms the charge and credits Drift's Balance.
+export async function confirmCheckoutPaymentIntent(paymentIntentId: string): Promise<{ status: string | null; netAmount: string | null }> {
+	const duffel = getClient();
+	const response = await duffel.paymentIntents.confirm(paymentIntentId);
+	return { status: response.data.status, netAmount: response.data.net_amount };
+}
+
+export interface CheckoutPassengerInput {
+	id: string; // must match one of Offer.passengers[].id
+	title: "mr" | "ms" | "mrs" | "miss";
+	gender: "m" | "f";
+	givenName: string;
+	familyName: string;
+	bornOn: string; // YYYY-MM-DD
+	email: string;
+	phoneNumber: string; // E.164, e.g. +61412345678
+}
+
+// Places the actual booking against the supplier, paid from Drift's
+// Balance (funded moments earlier by the confirmed Payment Intent above).
+// Re-verifies the offer again immediately before booking -- the Payment
+// Intent step and this step are two separate round trips to the
+// traveler's bank, so the fare could theoretically have moved or expired
+// in between.
+export async function createFlightOrder(params: {
+	userId: string;
+	duffelOfferId: string;
+	passengers: CheckoutPassengerInput[];
+	paymentIntentId: string;
+}): Promise<{ id: string; bookingReference: string; status: string }> {
+	const duffel = getClient();
+	const offer = await reverifyOffer(params.duffelOfferId);
+	if (new Date(offer.expires_at) < new Date()) {
+		throw new Error("This fare has expired -- please search again");
+	}
+
+	const baseAmount = parseFloat(offer.base_amount) + (offer.tax_amount ? parseFloat(offer.tax_amount) : 0);
+	const { totalAmount, markupAmount, ruleId } = await applyMarkup(baseAmount);
+
+	const orderPassengers = params.passengers.map((p) => {
+		const offerPassenger = offer.passengers.find((op) => op.id === p.id);
+		if (!offerPassenger) throw new Error(`Passenger id ${p.id} not found on offer ${offer.id}`);
+		return {
+			id: p.id,
+			title: p.title,
+			gender: p.gender,
+			given_name: p.givenName,
+			family_name: p.familyName,
+			born_on: p.bornOn,
+			email: p.email,
+			phone_number: p.phoneNumber,
+			type: offerPassenger.type ?? "adult",
+		};
+	});
+
+	const orderResponse = await duffel.orders.create({
+		selected_offers: [offer.id],
+		passengers: orderPassengers as any,
+		payments: [{ type: "balance", amount: offer.total_amount, currency: offer.total_currency }],
+		type: "instant",
+		metadata: { payment_intent_id: params.paymentIntentId },
+	});
+	const order = orderResponse.data;
+
+	const { rows } = await pool.query(
+		`INSERT INTO flight_orders
+		   (user_id, duffel_order_id, source_offer_id, booking_reference, status, slices,
+		    duffel_cost_amount, duffel_cost_currency, price_charged_amount, price_charged_currency,
+		    markup_amount, markup_rule_id, payment_intent_id)
+		 VALUES ($1,$2,$3,$4,'confirmed',$5,$6,$7,$8,$9,$10,$11,$12)
+		 RETURNING id, booking_reference, status`,
+		[
+			params.userId,
+			order.id,
+			offer.id,
+			order.booking_reference,
+			JSON.stringify(order.slices),
+			baseAmount,
+			offer.total_currency,
+			totalAmount,
+			offer.total_currency,
+			markupAmount,
+			ruleId,
+			params.paymentIntentId,
+		]
+	);
+	const flightOrderRow = rows[0];
+
+	for (const p of orderPassengers) {
+		await pool.query(
+			`INSERT INTO flight_order_passengers
+			   (flight_order_id, duffel_passenger_id, title, given_name, family_name, date_of_birth, gender)
+			 VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+			[flightOrderRow.id, p.id, p.title, p.given_name, p.family_name, p.born_on, p.gender]
+		);
+	}
+
+	return { id: flightOrderRow.id, bookingReference: flightOrderRow.booking_reference, status: flightOrderRow.status };
+}
