@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import api from '../services/api.web';
 import { DuffelPayments } from '@duffel/components';
 
@@ -228,7 +228,18 @@ function CheckoutModal({
   );
 }
 
+interface FlightOrderSummary {
+  id: string;
+  bookingReference: string;
+  status: string;
+  priceChargedAmount: number;
+  priceChargedCurrency: string;
+  createdAt: string;
+  slices: FlightSlice[];
+}
+
 export default function FlightsScreen() {
+  const [tripType, setTripType] = useState<'roundtrip' | 'oneway'>('roundtrip');
   const [origin, setOrigin] = useState('');
   const [destination, setDestination] = useState('');
   const [departureDate, setDepartureDate] = useState('');
@@ -242,6 +253,18 @@ export default function FlightsScreen() {
   const [searched, setSearched] = useState(false);
   const [checkoutOffer, setCheckoutOffer] = useState<FlightOffer | null>(null);
   const [booking, setBooking] = useState<{ bookingReference: string } | null>(null);
+  const [myOrders, setMyOrders] = useState<FlightOrderSummary[]>([]);
+
+  const loadMyOrders = () => {
+    api.get('/flights/orders').then((res) => setMyOrders(res.data.orders || [])).catch(() => {});
+  };
+
+  useEffect(() => { loadMyOrders(); }, []);
+
+  const handleTripTypeChange = (next: 'roundtrip' | 'oneway') => {
+    setTripType(next);
+    if (next === 'oneway') setReturnDate('');
+  };
 
   const handleSearch = async () => {
     if (origin.length !== 3 || destination.length !== 3) {
@@ -258,7 +281,7 @@ export default function FlightsScreen() {
         origin: origin.toUpperCase(),
         destination: destination.toUpperCase(),
         departureDate,
-        returnDate: returnDate || undefined,
+        returnDate: tripType === 'roundtrip' && returnDate ? returnDate : undefined,
         adults,
         cabinClass,
       });
@@ -283,6 +306,22 @@ export default function FlightsScreen() {
       </div>
 
       <div style={s.searchCard}>
+        <div style={s.tripTypeRow}>
+          <button
+            type="button"
+            style={{ ...s.tripTypeBtn, ...(tripType === 'roundtrip' ? s.tripTypeBtnActive : {}) }}
+            onClick={() => handleTripTypeChange('roundtrip')}
+          >
+            Round trip
+          </button>
+          <button
+            type="button"
+            style={{ ...s.tripTypeBtn, ...(tripType === 'oneway' ? s.tripTypeBtnActive : {}) }}
+            onClick={() => handleTripTypeChange('oneway')}
+          >
+            One way
+          </button>
+        </div>
         <div style={s.searchRow}>
           <div style={s.field}>
             <label style={s.label}>From</label>
@@ -296,10 +335,12 @@ export default function FlightsScreen() {
             <label style={s.label}>Departure</label>
             <input style={s.input} type="date" value={departureDate} onChange={(e) => setDepartureDate(e.target.value)} />
           </div>
-          <div style={s.field}>
-            <label style={s.label}>Return (optional)</label>
-            <input style={s.input} type="date" value={returnDate} onChange={(e) => setReturnDate(e.target.value)} />
-          </div>
+          {tripType === 'roundtrip' && (
+            <div style={s.field}>
+              <label style={s.label}>Return</label>
+              <input style={s.input} type="date" value={returnDate} onChange={(e) => setReturnDate(e.target.value)} />
+            </div>
+          )}
           <div style={s.fieldNarrow}>
             <label style={s.label}>Adults</label>
             <input style={s.input} type="number" min={1} max={9} value={adults} onChange={(e) => setAdults(parseInt(e.target.value, 10) || 1)} />
@@ -372,8 +413,28 @@ export default function FlightsScreen() {
         <CheckoutModal
           offer={checkoutOffer}
           onClose={() => setCheckoutOffer(null)}
-          onBooked={(b) => { setBooking(b); setCheckoutOffer(null); }}
+          onBooked={(b) => { setBooking(b); setCheckoutOffer(null); loadMyOrders(); }}
         />
+      )}
+
+      {myOrders.length > 0 && (
+        <div style={s.myBookings}>
+          <h2 style={s.myBookingsTitle}>Your bookings</h2>
+          {myOrders.map((order) => (
+            <div key={order.id} style={s.myBookingCard}>
+              <div style={s.myBookingHeader}>
+                <span style={s.myBookingRef}>{order.bookingReference}</span>
+                <span style={s.myBookingStatus}>{order.status}</span>
+                <span style={s.price}>${order.priceChargedAmount.toFixed(2)} {order.priceChargedCurrency}</span>
+              </div>
+              {order.slices.map((slice, i) => (
+                <p key={i} style={s.myBookingSlice}>
+                  {slice.originAirport} → {slice.destinationAirport} · {formatTime(slice.departingAt)} - {formatTime(slice.arrivingAt)}
+                </p>
+              ))}
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );
@@ -385,6 +446,9 @@ const s: Record<string, React.CSSProperties> = {
   title: { fontSize: 26, fontWeight: 700, color: C.text, margin: 0, fontFamily: "'DM Serif Display', serif" },
   subtitle: { fontSize: 14, color: C.muted, marginTop: 6 },
   searchCard: { background: C.white, border: `1px solid ${C.border}`, borderRadius: 16, padding: 20, marginBottom: 24 },
+  tripTypeRow: { display: 'flex', gap: 8, marginBottom: 14 },
+  tripTypeBtn: { padding: '7px 16px', borderRadius: 20, border: `1.5px solid ${C.border}`, background: C.bg, color: C.muted, fontSize: 13, fontWeight: 600, cursor: 'pointer' },
+  tripTypeBtnActive: { background: C.goldLight, borderColor: C.gold, color: C.goldDark },
   searchRow: { display: 'flex', gap: 12, flexWrap: 'wrap' as const, marginBottom: 14 },
   field: { flex: '1 1 140px', minWidth: 120 },
   fieldNarrow: { flex: '0 1 80px', minWidth: 70 },
@@ -409,6 +473,13 @@ const s: Record<string, React.CSSProperties> = {
   disclosure: { fontSize: 11, color: C.muted, marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}` },
   bookBtn: { marginTop: 10, width: '100%', padding: '11px 22px', background: C.gold, color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: 'pointer' },
   confirmation: { background: '#E8F5E9', color: '#2E7D32', padding: '12px 16px', borderRadius: 8, marginBottom: 16, fontSize: 14 },
+  myBookings: { marginTop: 32 },
+  myBookingsTitle: { fontSize: 18, fontWeight: 700, color: C.text, marginBottom: 12, fontFamily: "'DM Serif Display', serif" },
+  myBookingCard: { background: C.white, border: `1px solid ${C.border}`, borderRadius: 12, padding: '14px 16px', marginBottom: 10 },
+  myBookingHeader: { display: 'flex', alignItems: 'center', gap: 12, marginBottom: 6 },
+  myBookingRef: { fontSize: 13, fontWeight: 700, color: C.text, letterSpacing: '0.5px' },
+  myBookingStatus: { fontSize: 11, color: C.goldDark, background: C.goldLight, padding: '2px 8px', borderRadius: 6, textTransform: 'uppercase' as const, fontWeight: 600, flex: 1 },
+  myBookingSlice: { fontSize: 13, color: C.muted, margin: '2px 0' },
 };
 
 const cs: Record<string, React.CSSProperties> = {

@@ -1,7 +1,20 @@
 import { Router, Request, Response } from "express";
 import { z } from "zod";
+import { DuffelError } from "@duffel/api";
 import { authenticate, AuthenticatedRequest } from "../middleware/authenticate";
-import { searchFlights, createCheckoutPaymentIntent, confirmCheckoutPaymentIntent, createFlightOrder } from "../services/flights";
+import { searchFlights, createCheckoutPaymentIntent, confirmCheckoutPaymentIntent, createFlightOrder, listFlightOrders } from "../services/flights";
+
+// Duffel's own validation errors (expired fare, an offer that's already
+// been booked from the same search, etc.) have a clear human-readable
+// message -- surface that instead of a generic 500 so the traveler knows
+// what actually happened and what to do about it.
+function respondToDuffelError(err: unknown, res: Response): boolean {
+	if (!(err instanceof DuffelError)) return false;
+	const first = err.errors[0];
+	console.error("Duffel API error:", err.meta, err.errors);
+	res.status(422).json({ message: first?.message ?? "This request could not be completed", code: first?.code });
+	return true;
+}
 
 export const flightsRouter = Router();
 
@@ -28,6 +41,7 @@ flightsRouter.post("/search", authenticate, async (req: AuthenticatedRequest, re
 		if (err instanceof Error && err.message.includes("not configured")) {
 			return res.status(503).json({ message: "Flight search is not yet available" });
 		}
+		if (respondToDuffelError(err, res)) return;
 		console.error(err);
 		return res.status(500).json({ message: "Internal server error" });
 	}
@@ -54,6 +68,7 @@ flightsRouter.post("/payment-intents", authenticate, async (req: AuthenticatedRe
 		if (err instanceof Error && err.message.includes("expired")) {
 			return res.status(409).json({ message: err.message });
 		}
+		if (respondToDuffelError(err, res)) return;
 		console.error(err);
 		return res.status(500).json({ message: "Internal server error" });
 	}
@@ -77,6 +92,7 @@ flightsRouter.post("/payment-intents/confirm", authenticate, async (req: Authent
 		if (err instanceof Error && err.message.includes("not configured")) {
 			return res.status(503).json({ message: "Flight booking is not yet available" });
 		}
+		if (respondToDuffelError(err, res)) return;
 		console.error(err);
 		return res.status(500).json({ message: "Internal server error" });
 	}
@@ -120,6 +136,20 @@ flightsRouter.post("/orders", authenticate, async (req: AuthenticatedRequest, re
 		if (err instanceof Error && err.message.includes("expired")) {
 			return res.status(409).json({ message: err.message });
 		}
+		if (respondToDuffelError(err, res)) return;
+		console.error(err);
+		return res.status(500).json({ message: "Internal server error" });
+	}
+});
+
+// GET /api/v1/flights/orders
+// The traveler's own past bookings -- previously there was no way to see
+// a confirmed flight again once the checkout modal closed.
+flightsRouter.get("/orders", authenticate, async (req: AuthenticatedRequest, res: Response) => {
+	try {
+		const orders = await listFlightOrders(req.user!.id);
+		return res.json({ orders });
+	} catch (err) {
 		console.error(err);
 		return res.status(500).json({ message: "Internal server error" });
 	}

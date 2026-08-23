@@ -413,3 +413,41 @@ export async function createFlightOrder(params: {
 
 	return { id: flightOrderRow.id, bookingReference: flightOrderRow.booking_reference, status: flightOrderRow.status };
 }
+
+export interface FlightOrderSummaryView {
+	id: string;
+	bookingReference: string;
+	status: string;
+	priceChargedAmount: number;
+	priceChargedCurrency: string;
+	createdAt: string;
+	slices: FlightSliceView[];
+}
+
+// order.slices, stored verbatim as jsonb at booking time (createFlightOrder
+// above), is Duffel's OrderSlice[] -- structurally the same origin/
+// destination/duration/segments shape as Offer["slices"][number] that
+// toSliceView() already maps (both verified against the real installed
+// types), so the same field access is reused here rather than duplicated.
+function orderSliceToView(slice: any): FlightSliceView {
+	return toSliceView(slice);
+}
+
+// The traveler's own past bookings -- there was no way to see a flight
+// order again after the confirmation screen closed until this existed.
+export async function listFlightOrders(userId: string): Promise<FlightOrderSummaryView[]> {
+	const { rows } = await pool.query(
+		`SELECT id, booking_reference, status, price_charged_amount, price_charged_currency, created_at, slices
+		 FROM flight_orders WHERE user_id = $1 ORDER BY created_at DESC`,
+		[userId]
+	);
+	return rows.map((row) => ({
+		id: row.id,
+		bookingReference: row.booking_reference,
+		status: row.status,
+		priceChargedAmount: parseFloat(row.price_charged_amount),
+		priceChargedCurrency: row.price_charged_currency,
+		createdAt: row.created_at,
+		slices: (row.slices ?? []).map(orderSliceToView),
+	}));
+}
