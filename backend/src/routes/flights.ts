@@ -10,7 +10,13 @@ import { searchFlights, createCheckoutPaymentIntent, confirmCheckoutPaymentInten
 // what actually happened and what to do about it.
 function respondToDuffelError(err: unknown, res: Response): boolean {
 	if (!(err instanceof DuffelError)) return false;
-	const first = err.errors[0];
+	// err.errors is typed as always present, but a real DuffelError thrown
+	// for e.g. a network/auth-level failure can have it undefined at
+	// runtime -- `err.errors[0]` crashed the entire process on this, not
+	// just the request, since this itself runs inside a route's catch
+	// block with nothing further to catch it. Confirmed live: took down
+	// the whole backend container.
+	const first = err.errors?.[0];
 	console.error("Duffel API error:", err.meta, err.errors);
 	res.status(422).json({ message: first?.message ?? "This request could not be completed", code: first?.code });
 	return true;

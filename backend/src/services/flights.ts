@@ -1,10 +1,10 @@
-import { Duffel } from "@duffel/api";
 // Offer (the data shape) isn't re-exported through the top-level
 // @duffel/api module -- only the resource classes are. Confirmed against
 // the installed package's own typings.d.ts rather than guessed.
 import type { Offer } from "@duffel/api/booking/Offers/OfferTypes";
 import crypto from "crypto";
 import { pool } from "../utils/db";
+import { getDuffelClient as getClient } from "../utils/duffelClient";
 
 // Flight search/booking via Duffel. Ships inactive: every function below
 // throws a clear "not configured" error until DUFFEL_API_KEY is set --
@@ -15,18 +15,6 @@ import { pool } from "../utils/db";
 // flight route, and the zero-commission-to-operators enforcement in
 // booking.ts's matchOfferToOperator() has no equivalent here -- airlines
 // are never a Drift-claimed local listing).
-
-let client: Duffel | null = null;
-
-function getClient(): Duffel {
-	if (!process.env.DUFFEL_API_KEY) {
-		throw new Error("DUFFEL_API_KEY not configured -- flight booking is inactive");
-	}
-	if (!client) {
-		client = new Duffel({ token: process.env.DUFFEL_API_KEY });
-	}
-	return client;
-}
 
 export interface FlightSearchParams {
 	origin: string; // IATA code, e.g. "SYD"
