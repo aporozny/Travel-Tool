@@ -1,16 +1,28 @@
-import { voice, llm } from "@livekit/agents";
+import { voice, llm, workflows } from "@livekit/agents";
 import { z } from "zod";
-import { lookupEmergencyNumbers, getContactsForCall, recordBridgeAttempt } from "../services/voiceAgent";
+import { lookupEmergencyNumbers, getContactsForCall, recordBridgeAttempt, pageReviewerForLiveTransfer } from "../services/voiceAgent";
 import type { CallOutcome } from "../services/voiceAgent";
 
 // The approved Drift Safety Line system prompt (voice_agent_workflow.md,
 // reviewed and signed off before any of this was built). The contact-bridge
 // paragraph is adapted from the original script: the original promised a
-// live warm transfer ("try calling [contact] right now"), which this build
-// does not implement yet -- see offer_contact_bridge below. The agent must
+// live warm transfer ("try calling [contact] right now") to the CALLER'S
+// OWN safety contact, which this build does not implement -- see
+// offer_contact_bridge below, still reviewer-follow-up only. The agent must
 // never claim a capability it doesn't have, so the instructions describe
-// what actually happens (a reviewer follows up), not what was originally
-// scripted.
+// what actually happens, not what was originally scripted.
+//
+// connect_to_reviewer (below, used in Branch A) is a *different* transfer
+// -- a live handoff to a human Drift reviewer, not the caller's own
+// contact -- built on LiveKit's WarmTransferTask
+// (docs.livekit.io/telephony/features/transfers/warm/), which dials the
+// reviewer into a private room, briefs them with the real conversation
+// context, and only merges them into the caller's room once they've
+// actually answered -- the caller is never at risk of being dropped if
+// the reviewer doesn't pick up. Ships inactive: the tool checks
+// SAFETY_REVIEWER_PHONE/LIVEKIT_SIP_OUTBOUND_TRUNK itself and tells the AI
+// to fall back to today's language if either is unset, same fail-closed
+// pattern as every other credential-gated feature in this codebase.
 //
 // The rules block below uses an explicit "# Guardrails" heading rather
 // than plain prose -- per ElevenLabs' own guardrails guidance
@@ -72,10 +84,14 @@ yes or no?"
 
 Branch A -- immediate danger (yes, or clear signals: injury, assault in
 progress, can't breathe, fire, drowning, being attacked): stop gathering
-information. Tell them to hang up and call their local emergency number
-now, that you're alerting their emergency contact and a Drift reviewer
-immediately with their last known info, and to stay on the line or call
-back if they can.
+information. Tell them their local emergency number is the fastest, most
+important thing they can do right now, and nothing here replaces that --
+say this before anything else. Then call connect_to_reviewer to attempt a
+live connection to a human Drift reviewer as a second line of support.
+While that's in progress, say you're trying to reach a reviewer live, not
+that you have. If the tool reports no live line is available, or the
+attempt fails, tell them plainly a Drift reviewer will follow up instead --
+stay factual, never falsely reassuring.
 
 Branch B -- distressed but not life-threatening (lost, followed, harassed,
 scared, minor injury, stranded, robbed but safe now, phone/documents
@@ -144,6 +160,35 @@ export function createSafetyAgent(callId: string, onOutcome: (outcome: CallOutco
 				execute: async ({ contactId }) => {
 					await recordBridgeAttempt(callId, false);
 					return `Noted contact ${contactId} for reviewer follow-up. Tell the caller a Drift reviewer will reach out to this contact directly -- you have not connected a live call.`;
+				},
+			}),
+			connect_to_reviewer: llm.tool({
+				description:
+					"Attempt to connect the caller live, right now, to a human Drift safety reviewer over the phone -- use in Branch A once you have at least a rough sense of what's happening, don't wait to gather every detail first. The caller stays connected to you the whole time; if the reviewer doesn't answer, you'll be told so and can keep going -- never claim a connection that hasn't actually happened.",
+				execute: async () => {
+					const reviewerPhone = process.env.SAFETY_REVIEWER_PHONE;
+					const trunkId = process.env.LIVEKIT_SIP_OUTBOUND_TRUNK;
+					if (!reviewerPhone || !trunkId) {
+						return "No live reviewer line is configured right now. Tell the caller a Drift reviewer will follow up as soon as possible -- do not say you're connecting them.";
+					}
+
+					pageReviewerForLiveTransfer(callId).catch((err) =>
+						console.error("Pre-transfer reviewer page failed:", err),
+					);
+
+					return llm.handoff({
+						agent: new workflows.WarmTransferTask({
+							sipCallTo: `tel:${reviewerPhone}`,
+							sipTrunkId: trunkId,
+							ringingTimeout: 25000,
+							instructions: {
+								extra:
+									"This is the Drift Safety Line. The caller may be in immediate danger. Brief the human Drift safety reviewer on what's known so far from the conversation, then connect them.",
+							},
+						}),
+						returns:
+							"Report back whether the live transfer succeeded or failed. If it failed or timed out, say so plainly and remind the caller of their local emergency number if you already gave it -- never claim a connection that didn't happen.",
+					});
 				},
 			}),
 			record_call_outcome: llm.tool({

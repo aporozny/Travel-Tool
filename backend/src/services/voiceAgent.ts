@@ -168,6 +168,30 @@ export async function recordBridgeAttempt(callId: string, connected: boolean): P
 	);
 }
 
+// Fired the instant a live warm-transfer attempt starts (see agent.ts's
+// connect_to_reviewer tool), not just at endCall() -- the reviewer needs
+// to know their phone is about to ring *before* it rings, not get an
+// email after the call has already ended. Best-effort: the transfer
+// attempt itself is the real signal; this is a redundant heads-up in
+// case they don't immediately place an unknown incoming call as urgent.
+export async function pageReviewerForLiveTransfer(callId: string): Promise<void> {
+	const { rows } = await pool.query(
+		`SELECT sac.caller_phone, t.first_name, t.last_name
+		 FROM sos_ai_calls sac
+		 LEFT JOIN users u ON u.id = sac.user_id
+		 LEFT JOIN travelers t ON t.user_id = u.id
+		 WHERE sac.id = $1`,
+		[callId],
+	);
+	const call = rows[0];
+	const travelerName = call ? [call.first_name, call.last_name].filter(Boolean).join(" ") || call.caller_phone : "Unknown caller";
+	await sendReviewerAlert({
+		subject: "Drift Safety Line: live transfer incoming",
+		body: `A caller (${travelerName}) is being connected to you live right now via the Safety Line. Answer the incoming call immediately.`,
+		urgent: true,
+	});
+}
+
 export interface EndCallParams {
 	callId: string;
 	outcome: CallOutcome | null;
