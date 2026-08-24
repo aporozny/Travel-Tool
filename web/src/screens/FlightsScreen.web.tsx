@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import api from '../services/api.web';
-import { DuffelPayments } from '@duffel/components';
+import { loadStripe } from '@stripe/stripe-js';
+import { Elements, CardNumberElement, CardExpiryElement, CardCvcElement, useStripe, useElements } from '@stripe/react-stripe-js';
 
 // ─── Design tokens ─────────────────────────────────────────────────────────
 // Matches TripsScreen.web.tsx / CommunityScreen.web.tsx / AppShell.web.tsx.
@@ -83,12 +84,105 @@ function formatStops(stops: number): string {
   return `${stops} stop${stops > 1 ? 's' : ''}`;
 }
 
+// Duffel's Payment Intent client_token is a base64 JSON blob wrapping the
+// underlying Stripe client_secret + publishable_key (Duffel Payments runs
+// on Stripe) -- confirmed live by decoding a real token, not documented
+// anywhere. Decoding it ourselves and driving Stripe Elements directly
+// (instead of @duffel/components' DuffelPayments, which renders Stripe's
+// PaymentElement with no layout or field control) is what makes a
+// multi-row card form and a hidden/backfilled postal code possible --
+// neither is configurable through DuffelPayments' props.
+function decodeClientToken(token: string): { clientSecret: string; publishableKey: string } {
+  const parsed = JSON.parse(atob(token));
+  return { clientSecret: parsed.client_secret, publishableKey: parsed.publishable_key };
+}
+
+const stripeElementStyle = {
+  base: {
+    fontSize: '14px',
+    color: C.text,
+    fontFamily: "'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif",
+    '::placeholder': { color: C.muted },
+  },
+  invalid: { color: '#c62828' },
+};
+
+// Raw card data never reaches Drift's servers -- Stripe Elements collect
+// it directly into Stripe's own iframes. We only ever see a card's
+// completion state (usable/not), never its number, expiry, or CVC.
+function StripeCardFields({
+  clientSecret,
+  onSuccess,
+  onFailure,
+}: {
+  clientSecret: string;
+  onSuccess: () => void;
+  onFailure: (err: any) => void;
+}) {
+  const stripe = useStripe();
+  const elements = useElements();
+  const [submitting, setSubmitting] = useState(false);
+
+  const handlePay = async () => {
+    if (!stripe || !elements) return;
+    const cardNumberElement = elements.getElement(CardNumberElement);
+    if (!cardNumberElement) return;
+    setSubmitting(true);
+    try {
+      const result = await stripe.confirmCardPayment(clientSecret, {
+        payment_method: {
+          card: cardNumberElement,
+          // No postal/address field is shown to the traveler -- we don't
+          // collect a billing address anywhere in this checkout, so a
+          // fixed placeholder goes to Stripe instead of asking for one.
+          // Stripe treats an unverifiable postal code as an AVS mismatch,
+          // not a decline; it doesn't block the charge.
+          billing_details: { address: { postal_code: '00000' } },
+        },
+      });
+      if (result.error) {
+        onFailure(result.error);
+        setSubmitting(false);
+        return;
+      }
+      if (result.paymentIntent?.status === 'succeeded' || result.paymentIntent?.status === 'requires_capture') {
+        onSuccess();
+      } else {
+        onFailure({ message: `Payment status: ${result.paymentIntent?.status ?? 'unknown'}. Try a different card.` });
+        setSubmitting(false);
+      }
+    } catch (err: any) {
+      onFailure(err);
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div>
+      <div style={cs.cardFieldFull}>
+        <CardNumberElement options={{ style: stripeElementStyle }} />
+      </div>
+      <div style={cs.passengerRow}>
+        <div style={cs.cardFieldHalf}>
+          <CardExpiryElement options={{ style: stripeElementStyle }} />
+        </div>
+        <div style={cs.cardFieldHalf}>
+          <CardCvcElement options={{ style: stripeElementStyle }} />
+        </div>
+      </div>
+      <button style={s.searchBtn} disabled={!stripe || submitting} onClick={handlePay}>
+        {submitting ? 'Charging...' : 'Pay'}
+      </button>
+    </div>
+  );
+}
+
 // Checkout: Payment Intent -> Balance -> Order (see RISK-REGISTER.md R12).
-// Duffel's own hosted DuffelCardForm collects the card -- raw card data
-// never reaches Drift's servers. The client_token from creating the
-// Payment Intent is passed as `clientKey`; submitting the form charges
-// that specific Payment Intent, which the backend then confirms and
-// spends from Drift's Balance to place the actual order.
+// Stripe Elements (via StripeCardFields above) collect the card directly
+// into Stripe's iframes -- raw card data never reaches Drift's servers.
+// Confirming the Payment Intent client-side charges the traveler; the
+// backend then confirms it server-side and spends from Drift's Balance to
+// place the actual order.
 function CheckoutModal({
   offer,
   onClose,
@@ -167,6 +261,15 @@ function CheckoutModal({
     setError(cardErr?.message || 'Card was declined. Try a different card.');
   };
 
+  const stripeData = useMemo(
+    () => (paymentIntent ? decodeClientToken(paymentIntent.clientToken) : null),
+    [paymentIntent]
+  );
+  const stripePromise = useMemo(
+    () => (stripeData ? loadStripe(stripeData.publishableKey) : null),
+    [stripeData]
+  );
+
   return (
     <div style={cs.overlay} onClick={onClose}>
       <div style={cs.modal} onClick={(e) => e.stopPropagation()}>
@@ -211,14 +314,16 @@ function CheckoutModal({
           </>
         )}
 
-        {step === 'payment' && paymentIntent && (
+        {step === 'payment' && paymentIntent && stripeData && stripePromise && (
           <>
             <p style={s.muted}>Charging ${paymentIntent.amount} {paymentIntent.currency}</p>
-            <DuffelPayments
-              paymentIntentClientToken={paymentIntent.clientToken}
-              onSuccessfulPayment={handleCardSuccess}
-              onFailedPayment={handleCardFailure}
-            />
+            <Elements stripe={stripePromise}>
+              <StripeCardFields
+                clientSecret={stripeData.clientSecret}
+                onSuccess={handleCardSuccess}
+                onFailure={handleCardFailure}
+              />
+            </Elements>
           </>
         )}
 
@@ -277,6 +382,14 @@ export default function FlightsScreen() {
     setError('');
     setSearched(true);
     try {
+      // The shared axios client defaults to a 10s timeout, which is too
+      // tight for this call specifically -- Duffel's own search response
+      // time varies with result-set size and isn't something our backend
+      // controls (the ~20s DB-side bug is fixed, see WP10.7; this is a
+      // separate, real ~10-15s ceiling on Duffel's side for larger
+      // result sets). A real search that succeeded server-side in ~11s
+      // was previously aborted client-side and shown as a generic
+      // failure -- confirmed live in production logs.
       const res = await api.post('/flights/search', {
         origin: origin.toUpperCase(),
         destination: destination.toUpperCase(),
@@ -284,11 +397,13 @@ export default function FlightsScreen() {
         returnDate: tripType === 'roundtrip' && returnDate ? returnDate : undefined,
         adults,
         cabinClass,
-      });
+      }, { timeout: 30000 });
       setOffers(res.data.offers || []);
     } catch (err: any) {
       if (err?.response?.status === 503) {
         setError("Flight search isn't turned on yet.");
+      } else if (err?.code === 'ECONNABORTED') {
+        setError('Search is taking longer than usual -- please try again.');
       } else {
         setError(err?.response?.data?.message || 'Could not search flights.');
       }
@@ -491,4 +606,6 @@ const cs: Record<string, React.CSSProperties> = {
   passengerBlock: { marginBottom: 16, paddingBottom: 16, borderBottom: `1px solid ${C.border}` },
   passengerLabel: { fontSize: 12, fontWeight: 600, color: C.muted, textTransform: 'uppercase' as const, letterSpacing: '0.4px', marginBottom: 8 },
   passengerRow: { display: 'flex', gap: 10, marginBottom: 10 },
+  cardFieldFull: { padding: '10px 12px', border: `1.5px solid ${C.border}`, borderRadius: 8, background: C.bg, marginBottom: 10 },
+  cardFieldHalf: { flex: 1, padding: '10px 12px', border: `1.5px solid ${C.border}`, borderRadius: 8, background: C.bg },
 };
