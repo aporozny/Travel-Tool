@@ -12,11 +12,6 @@ const C = {
   soft:      '#F5F3EF',
 };
 
-const REGIONS = [
-  'Seminyak','Canggu','Ubud','Nusa Penida','Uluwatu',
-  'Sanur','Amed','Tulamben','Lombok','Gili Islands','Flores','Sidemen',
-];
-
 interface WhosGoingProps {
   region?: string;
 }
@@ -74,7 +69,7 @@ export function WhosGoingPanel({ region }: WhosGoingProps) {
         <div style={s.iconWrap}>◈</div>
         <div style={{ flex: 1 }}>
           <div style={s.title}>
-            Who's going{region ? ` to ${region}` : ' to Bali'}?
+            Who's going{region ? ` to ${region}` : ''}?
           </div>
           <div style={s.sub}>
             {loading ? 'Loading...' : trips.length === 0
@@ -92,11 +87,8 @@ export function WhosGoingPanel({ region }: WhosGoingProps) {
           <div style={s.formRow}>
             <input style={s.input} placeholder="Destination *" value={dest}
               onChange={e => setDest(e.target.value)} />
-            <select style={s.input} value={tripRegion}
-              onChange={e => setTripRegion(e.target.value)}>
-              <option value="">Region</option>
-              {REGIONS.map(r => <option key={r} value={r}>{r}</option>)}
-            </select>
+            <input style={s.input} placeholder="Region (optional)" value={tripRegion}
+              onChange={e => setTripRegion(e.target.value)} />
           </div>
           <div style={s.formRow}>
             <input style={s.input} type="date" value={startDate}

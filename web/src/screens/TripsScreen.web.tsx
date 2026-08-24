@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useSelector } from 'react-redux';
 import { RootState } from '../store';
 import api from '../services/api.web';
+import { WhosGoingPanel } from './WhosGoingPanel';
 
 // ─── Design tokens ─────────────────────────────────────────────────────────
 // Matches CommunityScreen.web.tsx / AppShell.web.tsx exactly -- same
@@ -61,6 +62,7 @@ export default function TripsScreen() {
   const { user } = useSelector((s: RootState) => s.auth);
   const isAdmin = user?.role === 'admin';
 
+  const [subTab, setSubTab] = useState<'curated' | 'travelers'>('curated');
   const [trips, setTrips] = useState<Trip[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -129,16 +131,37 @@ export default function TripsScreen() {
       <div style={s.header}>
         <div>
           <h1 style={s.title}>Trips</h1>
-          <p style={s.subtitle}>Curated trips you can join -- posted by Drift, not the algorithm.</p>
+          <p style={s.subtitle}>
+            {subTab === 'curated'
+              ? "Curated trips you can join -- posted by Drift, not the algorithm."
+              : 'Travelers heading somewhere and looking for company -- post your own or see who else is going.'}
+          </p>
         </div>
-        {isAdmin && (
+        {isAdmin && subTab === 'curated' && (
           <button style={s.createBtn} onClick={() => setCreating(true)}>+ New trip</button>
         )}
       </div>
 
-      {error && <div style={s.error}>{error}</div>}
+      <div style={s.subTabRow}>
+        <button
+          style={{ ...s.subTabBtn, ...(subTab === 'curated' ? s.subTabBtnActive : {}) }}
+          onClick={() => setSubTab('curated')}
+        >
+          Curated trips
+        </button>
+        <button
+          style={{ ...s.subTabBtn, ...(subTab === 'travelers' ? s.subTabBtnActive : {}) }}
+          onClick={() => setSubTab('travelers')}
+        >
+          Travelers going your way
+        </button>
+      </div>
 
-      {loading ? (
+      {subTab === 'travelers' && <WhosGoingPanel />}
+
+      {subTab === 'curated' && error && <div style={s.error}>{error}</div>}
+
+      {subTab === 'curated' && (loading ? (
         <p style={s.muted}>Loading trips...</p>
       ) : trips.length === 0 ? (
         <div style={s.empty}>
@@ -199,9 +222,9 @@ export default function TripsScreen() {
             </div>
           ))}
         </div>
-      )}
+      ))}
 
-      {creating && (
+      {subTab === 'curated' && creating && (
         <CreateTripModal
           onClose={() => setCreating(false)}
           onCreated={() => { setCreating(false); loadTrips(); }}
@@ -314,6 +337,9 @@ const s: Record<string, React.CSSProperties> = {
   title: { fontSize: 26, fontWeight: 700, color: C.text, margin: 0, fontFamily: "'DM Serif Display', serif" },
   subtitle: { fontSize: 14, color: C.muted, marginTop: 6 },
   createBtn: { padding: '10px 18px', background: C.gold, color: '#fff', border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 600, cursor: 'pointer' },
+  subTabRow: { display: 'flex', gap: 8, marginBottom: 20, borderBottom: `1px solid ${C.border}` },
+  subTabBtn: { padding: '10px 4px', marginRight: 20, background: 'transparent', border: 'none', borderBottom: '2px solid transparent', color: C.muted, fontSize: 14, fontWeight: 600, cursor: 'pointer' },
+  subTabBtnActive: { color: C.text, borderBottomColor: C.gold },
   error: { background: '#ffebee', color: '#c62828', padding: '10px 14px', borderRadius: 8, marginBottom: 16, fontSize: 13 },
   muted: { color: C.muted, fontSize: 14 },
   mutedSmall: { color: C.muted, fontSize: 12 },
