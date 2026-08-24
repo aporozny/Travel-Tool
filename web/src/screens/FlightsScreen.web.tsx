@@ -371,6 +371,18 @@ export default function FlightsScreen() {
     if (next === 'oneway') setReturnDate('');
   };
 
+  // Neither date input had a `min`, so the native picker had no idea a
+  // return date can't be before the departure date -- it could show
+  // (and let you pick) an earlier or identical date with no constraint
+  // at all. `min` fixes the picker itself; clearing an now-invalid
+  // returnDate here covers the case where departure moves later after a
+  // return date was already chosen.
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const handleDepartureDateChange = (value: string) => {
+    setDepartureDate(value);
+    if (returnDate && value && returnDate < value) setReturnDate('');
+  };
+
   const handleSearch = async () => {
     if (origin.length !== 3 || destination.length !== 3) {
       setError('Enter valid 3-letter airport codes (e.g. SYD, LHR).');
@@ -448,12 +460,12 @@ export default function FlightsScreen() {
           </div>
           <div style={s.field}>
             <label style={s.label}>Departure</label>
-            <input style={s.input} type="date" value={departureDate} onChange={(e) => setDepartureDate(e.target.value)} />
+            <input style={s.input} type="date" min={todayIso} value={departureDate} onChange={(e) => handleDepartureDateChange(e.target.value)} />
           </div>
           {tripType === 'roundtrip' && (
             <div style={s.field}>
               <label style={s.label}>Return</label>
-              <input style={s.input} type="date" value={returnDate} onChange={(e) => setReturnDate(e.target.value)} />
+              <input style={s.input} type="date" min={departureDate || todayIso} value={returnDate} onChange={(e) => setReturnDate(e.target.value)} />
             </div>
           )}
           <div style={s.fieldNarrow}>
