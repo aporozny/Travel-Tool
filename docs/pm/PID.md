@@ -59,9 +59,9 @@ See PRODUCT-DESCRIPTIONS.md. Summary:
 | Stage 6 | Booking ecosystem Phase 1: activities via Viator | Code complete, live pending VIATOR_API_KEY — see STAGE-PLAN-6.md |
 | Stage 7 | Drift Safety Line: inbound voice agent (LiveKit + Claude + ElevenLabs) | Live — see STAGE-PLAN-7.md |
 | Stage 8 | Public launch readiness: security audit, password reset | Complete, two Executive actions open — see STAGE-PLAN-8.md |
-| Stage 9 | Owner-curated Trips with RSVP | Complete — see STAGE-PLAN-9.md |
-| Stage 10 | Booking ecosystem Phase 2: flights via Duffel (search live, checkout pending) | Search live, checkout blocked on Executive decision — see STAGE-PLAN-10.md |
-| Stage 11 | Booking ecosystem Phase 3: stays/hotels via Duffel | Research complete, build not started — see STAGE-PLAN-11.md |
+| Stage 9 | Owner-curated Trips with RSVP, plus traveler-declared "going your way" trips surfaced in the same tab | Complete — see STAGE-PLAN-9.md |
+| Stage 10 | Booking ecosystem Phase 2: flights via Duffel | **Live** — real booking completed end-to-end on production (M6UT4V); one-way/return-date/card-form UX fixes shipped — see STAGE-PLAN-10.md |
+| Stage 11 | Booking ecosystem Phase 3: stays/hotels via Duffel | Search built and verified correct against the real API; blocked on Duffel enabling Stays for the account (403, confirmed live) — see STAGE-PLAN-11.md |
 
 ## 5. Project controls
 - **Tolerances:** Stage 1 time ±1 session; scope: P1–P6 fixed, no gold-plating. Escalate to Executive if any product cannot be delivered.
