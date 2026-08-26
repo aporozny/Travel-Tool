@@ -94,3 +94,66 @@ export async function geocodeDestination(
 		return null;
 	}
 }
+
+export interface ReverseCountryResult {
+	countryCode: string; // ISO 3166-1 alpha-2, e.g. "ID"
+	countryName: string; // e.g. "Indonesia"
+}
+
+/**
+ * Reverse-geocode a lat/lng to a country, for feeding the Safety Line a
+ * last-known location without asking the caller. Same Google Geocoding
+ * endpoint as geocodeDestination, just latlng= instead of address= — no
+ * new API key needed. Cached in Redis at 2-decimal precision (~1km grid,
+ * plenty for "which country") so nearby pings share a cache entry.
+ * Returns null on failure — callers must fall back to asking, never
+ * guess a country with confidence they don't have.
+ */
+export async function reverseGeocodeCountry(
+	lat: number,
+	lng: number,
+): Promise<ReverseCountryResult | null> {
+	const key = `geo:rev:v1:${lat.toFixed(2)},${lng.toFixed(2)}`;
+
+	try {
+		const cached = await redis.get(key);
+		if (cached) return JSON.parse(cached);
+	} catch {
+		// Redis down — proceed to API
+	}
+
+	if (!GOOGLE_API_KEY) return null;
+
+	try {
+		const { data } = await axios.get(
+			"https://maps.googleapis.com/maps/api/geocode/json",
+			{ params: { latlng: `${lat},${lng}`, key: GOOGLE_API_KEY, language: "en" } },
+		);
+		if (data.status !== "OK" || !data.results?.length) return null;
+
+		const countryComp = data.results
+			.flatMap((r: any) => r.address_components || [])
+			.find((c: any) => c.types.includes("country"));
+		if (!countryComp) return null;
+
+		const result: ReverseCountryResult = {
+			countryCode: countryComp.short_name,
+			countryName: countryComp.long_name,
+		};
+
+		try {
+			await redis.setex(key, CACHE_TTL_SECONDS, JSON.stringify(result));
+		} catch {
+			// cache write failure is non-fatal
+		}
+		return result;
+	} catch (err) {
+		console.error(
+			"Reverse geocoding failed for",
+			lat,
+			lng,
+			err instanceof Error ? err.message : err,
+		);
+		return null;
+	}
+}

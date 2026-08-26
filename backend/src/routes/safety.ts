@@ -4,6 +4,8 @@ import { pool } from '../utils/db';
 import { redis } from '../utils/redis';
 import { authenticate, AuthenticatedRequest } from '../middleware/authenticate';
 import { sendSOSAlert } from '../services/notifications';
+import { getLatestConsent, recordConsent } from '../services/consent';
+import { upsertPresence, removePresence } from '../utils/geoPresence';
 
 export const safetyRouter = Router();
 
@@ -12,6 +14,10 @@ const locationSchema = z.object({
   longitude: z.number().min(-180).max(180),
   accuracy: z.number().positive().optional(),
   timestamp: z.number().optional(),
+});
+
+const tripModeSchema = z.object({
+  enabled: z.boolean(),
 });
 
 const contactSchema = z.object({
@@ -34,6 +40,12 @@ safetyRouter.post('/location', authenticate, async (req: AuthenticatedRequest, r
     if (req.user!.role !== 'traveler') {
       return res.status(403).json({ message: 'Only travelers can submit location updates' });
     }
+
+    const consent = await getLatestConsent(req.user!.id, 'location_tracking');
+    if (!consent?.granted) {
+      return res.status(403).json({ message: 'Location consent required. Enable Trip Mode to grant consent.' });
+    }
+
     const body = locationSchema.parse(req.body);
     const recordedAt = body.timestamp
       ? new Date(body.timestamp * 1000).toISOString()
@@ -46,11 +58,7 @@ safetyRouter.post('/location', authenticate, async (req: AuthenticatedRequest, r
       [req.user!.id, body.latitude, body.longitude, body.accuracy ?? null, recordedAt]
     );
 
-    await redis.setex(
-      `location:${req.user!.id}`,
-      60 * 60 * 24,
-      JSON.stringify({ latitude: body.latitude, longitude: body.longitude, recorded_at: recordedAt })
-    );
+    await upsertPresence(req.user!.id, body.latitude, body.longitude, recordedAt);
 
     return res.status(201).json({ id: result.rows[0].id, recorded_at: result.rows[0].recorded_at });
   } catch (err) {
@@ -78,6 +86,26 @@ safetyRouter.get('/location/history', authenticate, async (req: AuthenticatedReq
     const result = await pool.query(query, params);
     return res.json(result.rows);
   } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+// POST /api/v1/safety/location/trip-mode — the actual on/off toggle.
+// Turning it on just records consent (POST /location does the real
+// gating on every ping); turning it off records the revocation AND
+// immediately purges the Redis presence entry, so opt-out doesn't wait
+// on the 24h cache TTL.
+safetyRouter.post('/location/trip-mode', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { enabled } = tripModeSchema.parse(req.body);
+    await recordConsent(req.user!.id, 'location_tracking', enabled);
+    if (!enabled) {
+      await removePresence(req.user!.id);
+    }
+    return res.json({ enabled });
+  } catch (err) {
+    if (err instanceof z.ZodError) return res.status(400).json({ message: 'Validation error', errors: err.errors });
     console.error(err);
     return res.status(500).json({ message: 'Internal server error' });
   }
@@ -620,7 +648,7 @@ safetyRouter.get('/operators/:id/trust', async (req: any, res: Response) => {
 safetyRouter.get('/emergency-numbers', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { country } = req.query;
-    
+
     if (!country || typeof country !== 'string') {
       return res.status(400).json({ error: 'country parameter required (ISO code: AU, ID, TH, etc)' });
     }

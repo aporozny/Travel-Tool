@@ -1,7 +1,9 @@
 import { Router, Response } from 'express';
 import { z } from 'zod';
 import { pool } from '../utils/db';
+import { redis } from '../utils/redis';
 import { authenticate, optionalAuth, AuthenticatedRequest } from '../middleware/authenticate';
+import { findNearby } from '../utils/geoPresence';
 
 export const membersRouter = Router();
 
@@ -237,6 +239,65 @@ membersRouter.get('/trips', optionalAuth, async (req: AuthenticatedRequest, res:
 
     const result = await pool.query(query, params);
     return res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+// GET /api/v1/members/nearby — live proximity, powered by Trip Mode.
+// Deliberately NOT scoped to people with a declared member_trips row
+// (that's a product decision, not an oversight -- see docs/pm/STAGE-PLAN-12.md):
+// anyone with Trip Mode on is matchable, and a declared trip is shown
+// alongside the match when the nearby member happens to have one, not
+// required to appear at all. Must come before the /:userId route below,
+// or Express would swallow "/nearby" as a userId.
+membersRouter.get('/nearby', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const radiusKm = Math.min(Math.max(parseFloat((req.query.radius_km as string) || '5'), 0.1), 50);
+
+    const cached = await redis.get(`location:${req.user!.id}`);
+    if (!cached) {
+      return res.status(400).json({ message: "Turn on Trip Mode to see who's nearby." });
+    }
+    const { latitude, longitude } = JSON.parse(cached);
+
+    const nearby = await findNearby(latitude, longitude, radiusKm, req.user!.id, 50);
+    if (nearby.length === 0) return res.json([]);
+
+    const userIds = nearby.map(n => n.userId);
+    const result = await pool.query(
+      `SELECT
+         u.id AS user_id,
+         COALESCE(t.display_name, t.first_name, split_part(u.email, '@', 1)) AS member_name,
+         t.avatar_url,
+         mp.travel_style AS member_style,
+         mt.destination, mt.start_date, mt.end_date
+       FROM users u
+       JOIN travelers t ON t.user_id = u.id
+       JOIN member_preferences mp ON mp.traveler_id = t.id
+       LEFT JOIN LATERAL (
+         SELECT destination, start_date, end_date FROM member_trips
+         WHERE member_trips.user_id = u.id AND is_public = true
+           AND (end_date IS NULL OR end_date >= CURRENT_DATE)
+         ORDER BY start_date ASC NULLS LAST
+         LIMIT 1
+       ) mt ON true
+       WHERE u.id = ANY($1) AND u.is_active = true AND t.show_in_directory = true`,
+      [userIds]
+    );
+
+    const byId = new Map(result.rows.map(r => [r.user_id, r]));
+    const response = nearby
+      .map(n => {
+        const profile = byId.get(n.userId);
+        if (!profile) return null;
+        return { ...profile, distance_km: n.distanceKm, last_seen_at: n.recordedAt };
+      })
+      .filter((row) => row !== null)
+      .sort((a: any, b: any) => a.distance_km - b.distance_km);
+
+    return res.json(response);
   } catch (err) {
     console.error(err);
     return res.status(500).json({ message: 'Internal server error' });

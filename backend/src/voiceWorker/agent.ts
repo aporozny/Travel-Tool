@@ -1,7 +1,7 @@
 import { voice, llm, workflows } from "@livekit/agents";
 import { z } from "zod";
 import { lookupEmergencyNumbers, getContactsForCall, recordBridgeAttempt, pageReviewerForLiveTransfer } from "../services/voiceAgent";
-import type { CallOutcome } from "../services/voiceAgent";
+import type { CallOutcome, CallerLocation } from "../services/voiceAgent";
 
 // The approved Drift Safety Line system prompt (voice_agent_workflow.md,
 // reviewed and signed off before any of this was built). The contact-bridge
@@ -134,13 +134,35 @@ up with them.`;
 
 const VALID_OUTCOMES: CallOutcome[] = ["genuine_emergency", "distressed_relayed", "false_alarm", "unclear_escalated"];
 
+// Appended to SYSTEM_PROMPT only when Drift already has a recent Trip Mode
+// location ping for this caller (see voiceWorker/index.ts). Explicitly a
+// hint to confirm, never a fact to assume -- a traveler who's moved to a
+// new country since their last ping is the real failure mode here, and
+// confidently giving the wrong country's emergency number is worse than
+// just asking like before.
+function buildLocationContext(knownLocation: CallerLocation): string {
+	return `
+
+# Known location (hint only, not confirmed)
+
+Drift's app last recorded this caller in ${knownLocation.countryName} (country code ${knownLocation.countryCode}) as of ${knownLocation.recordedAt}. This is a hint, not a fact -- they may have travelled since then. If what the caller says is consistent with being in ${knownLocation.countryName}, you may proactively call lookup_emergency_number with countryCode "${knownLocation.countryCode}" without waiting to ask where they are. If anything the caller says contradicts this (a different city/country, or any uncertainty), confirm their actual location with them before relying on this hint -- never give a confident answer built on a stale or wrong location.`;
+}
+
 // One Agent instance per call, closed over that call's callId (the
 // sos_ai_calls row id from startCall()) so every tool call is scoped to
 // the right record without the LLM ever having to pass an ID around --
 // unlike a webhook-based platform, this is all one process/closure.
-export function createSafetyAgent(callId: string, onOutcome: (outcome: CallOutcome) => void): voice.Agent {
+// knownLocation is optional and best-effort: passed from voiceWorker/
+// index.ts when the caller resolved to a registered user with a recent
+// Trip Mode ping cached in Redis; absent it, the agent behaves exactly
+// as before (asks the caller directly).
+export function createSafetyAgent(
+	callId: string,
+	onOutcome: (outcome: CallOutcome) => void,
+	knownLocation?: CallerLocation | null,
+): voice.Agent {
 	return new voice.Agent({
-		instructions: SYSTEM_PROMPT,
+		instructions: SYSTEM_PROMPT + (knownLocation ? buildLocationContext(knownLocation) : ""),
 		tools: {
 			lookup_emergency_number: llm.tool({
 				description:

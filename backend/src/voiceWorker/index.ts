@@ -2,7 +2,7 @@ import { defineAgent, cli, WorkerOptions, voice, inference, AgentSessionEventTyp
 import { ParticipantKind } from "@livekit/rtc-node";
 import { LLM as AnthropicLLM } from "@livekit/agents-plugin-anthropic";
 import { TTS as ElevenLabsTTS } from "@livekit/agents-plugin-elevenlabs";
-import { startCall, endCall } from "../services/voiceAgent";
+import { startCall, endCall, getCallerLastLocation } from "../services/voiceAgent";
 import type { CallOutcome } from "../services/voiceAgent";
 import { createSafetyAgent } from "./agent";
 
@@ -47,7 +47,13 @@ export default defineAgent({
 			return;
 		}
 
-		const { callId } = await startCall({ callerPhone, platform: "livekit", platformCallId });
+		const { callId, caller } = await startCall({ callerPhone, platform: "livekit", platformCallId });
+
+		// Best-effort: only present if the caller resolved to a registered
+		// user AND that user has a recent Trip Mode ping cached in Redis. A
+		// miss here just means the agent falls back to asking, exactly as
+		// before this existed -- never blocks call start.
+		const knownLocation = caller.userId ? await getCallerLastLocation(caller.userId).catch(() => null) : null;
 
 		let outcome: CallOutcome | null = null;
 		const session = new voice.AgentSession({
@@ -133,7 +139,7 @@ export default defineAgent({
 		});
 
 		try {
-			await session.start({ agent: createSafetyAgent(callId, (o) => (outcome = o)), room: ctx.room });
+			await session.start({ agent: createSafetyAgent(callId, (o) => (outcome = o), knownLocation), room: ctx.room });
 			await session.generateReply();
 
 			await new Promise<void>((resolve) => {

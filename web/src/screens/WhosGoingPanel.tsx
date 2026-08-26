@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import api from '../services/api.web';
+import { useTripMode } from '../hooks/useTripMode.web';
 
 const C = {
   gold:      '#C9A84C',
@@ -16,6 +17,13 @@ interface WhosGoingProps {
   region?: string;
 }
 
+interface NearbyMember {
+  user_id: string;
+  member_name: string;
+  destination?: string;
+  distance_km: number;
+}
+
 export function WhosGoingPanel({ region }: WhosGoingProps) {
   const [trips, setTrips] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -28,6 +36,15 @@ export function WhosGoingPanel({ region }: WhosGoingProps) {
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
 
+  // "Near you now" -- live proximity, powered by Trip Mode. Separate mode
+  // from the destination search above since matches here don't require a
+  // declared trip at all (see backend/src/routes/members.ts GET /nearby).
+  const [nearMode, setNearMode] = useState(false);
+  const [nearby, setNearby] = useState<NearbyMember[]>([]);
+  const [nearLoading, setNearLoading] = useState(false);
+  const [nearError, setNearError] = useState<string | null>(null);
+  const { enabled: tripModeOn, enable: enableTripMode } = useTripMode();
+
   const loadTrips = () => {
     const params = region ? `?region=${encodeURIComponent(region)}` : '';
     api.get(`/members/trips${params}`)
@@ -36,7 +53,17 @@ export function WhosGoingPanel({ region }: WhosGoingProps) {
       .finally(() => setLoading(false));
   };
 
+  const loadNearby = () => {
+    setNearLoading(true);
+    setNearError(null);
+    api.get('/members/nearby?radius_km=10')
+      .then(r => setNearby(r.data || []))
+      .catch((e) => setNearError(e.response?.data?.message || 'Could not load nearby members.'))
+      .finally(() => setNearLoading(false));
+  };
+
   useEffect(() => { loadTrips(); }, [region]);
+  useEffect(() => { if (nearMode) loadNearby(); }, [nearMode, tripModeOn]);
 
   const handlePlan = async () => {
     if (!dest.trim()) return;
@@ -69,82 +96,130 @@ export function WhosGoingPanel({ region }: WhosGoingProps) {
         <div style={s.iconWrap}>◈</div>
         <div style={{ flex: 1 }}>
           <div style={s.title}>
-            Who's going{region ? ` to ${region}` : ''}?
+            {nearMode ? 'Who\'s near you now?' : `Who's going${region ? ` to ${region}` : ''}?`}
           </div>
           <div style={s.sub}>
-            {loading ? 'Loading...' : trips.length === 0
-              ? 'No trips planned yet'
-              : `${trips.length} member${trips.length !== 1 ? 's' : ''} planning a trip`}
+            {nearMode
+              ? (nearLoading ? 'Loading...' : nearError ? nearError : `${nearby.length} member${nearby.length !== 1 ? 's' : ''} nearby`)
+              : (loading ? 'Loading...' : trips.length === 0
+                ? 'No trips planned yet'
+                : `${trips.length} member${trips.length !== 1 ? 's' : ''} planning a trip`)}
           </div>
         </div>
-        <button style={s.goingBtn} onClick={() => setShowForm(!showForm)}>
-          {showForm ? 'Cancel' : "I'm going"}
+        {!nearMode && (
+          <button style={s.goingBtn} onClick={() => setShowForm(!showForm)}>
+            {showForm ? 'Cancel' : "I'm going"}
+          </button>
+        )}
+      </div>
+
+      <div style={s.modeRow}>
+        <button style={{ ...s.modeBtn, ...(!nearMode ? s.modeBtnActive : {}) }} onClick={() => setNearMode(false)}>
+          Planned trips
+        </button>
+        <button style={{ ...s.modeBtn, ...(nearMode ? s.modeBtnActive : {}) }} onClick={() => setNearMode(true)}>
+          Near you now
         </button>
       </div>
 
-      {showForm && (
-        <div style={s.form}>
-          <div style={s.formRow}>
-            <input style={s.input} placeholder="Destination *" value={dest}
-              onChange={e => setDest(e.target.value)} />
-            <input style={s.input} placeholder="Region (optional)" value={tripRegion}
-              onChange={e => setTripRegion(e.target.value)} />
-          </div>
-          <div style={s.formRow}>
-            <input style={s.input} type="date" value={startDate}
-              onChange={e => setStartDate(e.target.value)} />
-            <input style={s.input} type="date" value={endDate}
-              onChange={e => setEndDate(e.target.value)} />
-          </div>
-          <textarea style={s.textarea}
-            placeholder="What are you looking for? Dive buddy, surf partner, dinner company..."
-            value={notes} onChange={e => setNotes(e.target.value)} />
-          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-            <button style={s.submitBtn} onClick={handlePlan} disabled={saving || !dest.trim()}>
-              {saving ? 'Sharing...' : 'Share trip'}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {!loading && trips.length > 0 && (
-        <div style={s.tripList}>
-          {visible.map((trip: any) => {
-            const initials = (trip.member_name || '?')
-              .split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase();
-            return (
-              <div key={trip.id} style={s.tripRow}>
-                <div style={s.avatar}>{initials}</div>
-                <div style={{ flex: 1 }}>
-                  <span style={s.memberName}>{trip.member_name}</span>
-                  <span style={s.arrow}> is heading to </span>
-                  <span style={s.tripDest}>{trip.destination}</span>
-                  {trip.start_date && (
-                    <span style={s.dates}>
-                      {' · '}{new Date(trip.start_date).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })}
-                      {trip.end_date && ` – ${new Date(trip.end_date).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })}`}
-                    </span>
-                  )}
-                  {trip.notes && <div style={s.tripNote}>{trip.notes}</div>}
-                </div>
-              </div>
-            );
-          })}
-          {trips.length > 3 && (
-            <button style={s.showMore} onClick={() => setExpanded(!expanded)}>
-              {expanded ? 'Show less' : `+${trips.length - 3} more`}
-            </button>
+      {nearMode ? (
+        <div style={{ marginTop: 14 }}>
+          {nearError && nearError.includes('Trip Mode') ? (
+            <div style={s.empty}>
+              <span style={{ color: C.muted, fontSize: 13 }}>Turn on Trip Mode to see who's nearby. </span>
+              <button style={s.inlineBtn} onClick={() => enableTripMode().then(loadNearby)}>
+                Turn on
+              </button>
+            </div>
+          ) : nearby.length > 0 ? (
+            <div style={s.tripList}>
+              {nearby.map((m) => {
+                const initials = (m.member_name || '?').split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase();
+                return (
+                  <div key={m.user_id} style={s.tripRow}>
+                    <div style={s.avatar}>{initials}</div>
+                    <div style={{ flex: 1 }}>
+                      <span style={s.memberName}>{m.member_name}</span>
+                      <span style={s.dates}> · {m.distance_km} km away</span>
+                      {m.destination && <div style={s.tripNote}>Heading to {m.destination}</div>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : !nearLoading && !nearError && (
+            <div style={s.empty}>
+              <span style={{ color: C.muted, fontSize: 13 }}>No members nearby right now.</span>
+            </div>
           )}
         </div>
-      )}
+      ) : (
+        <>
+          {showForm && (
+            <div style={s.form}>
+              <div style={s.formRow}>
+                <input style={s.input} placeholder="Destination *" value={dest}
+                  onChange={e => setDest(e.target.value)} />
+                <input style={s.input} placeholder="Region (optional)" value={tripRegion}
+                  onChange={e => setTripRegion(e.target.value)} />
+              </div>
+              <div style={s.formRow}>
+                <input style={s.input} type="date" value={startDate}
+                  onChange={e => setStartDate(e.target.value)} />
+                <input style={s.input} type="date" value={endDate}
+                  onChange={e => setEndDate(e.target.value)} />
+              </div>
+              <textarea style={s.textarea}
+                placeholder="What are you looking for? Dive buddy, surf partner, dinner company..."
+                value={notes} onChange={e => setNotes(e.target.value)} />
+              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <button style={s.submitBtn} onClick={handlePlan} disabled={saving || !dest.trim()}>
+                  {saving ? 'Sharing...' : 'Share trip'}
+                </button>
+              </div>
+            </div>
+          )}
 
-      {!loading && trips.length === 0 && !showForm && (
-        <div style={s.empty}>
-          <span style={{ color: C.muted, fontSize: 13 }}>No trips shared yet. </span>
-          <button style={s.inlineBtn} onClick={() => setShowForm(true)}>
-            Be the first
-          </button>
-        </div>
+          {!loading && trips.length > 0 && (
+            <div style={s.tripList}>
+              {visible.map((trip: any) => {
+                const initials = (trip.member_name || '?')
+                  .split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase();
+                return (
+                  <div key={trip.id} style={s.tripRow}>
+                    <div style={s.avatar}>{initials}</div>
+                    <div style={{ flex: 1 }}>
+                      <span style={s.memberName}>{trip.member_name}</span>
+                      <span style={s.arrow}> is heading to </span>
+                      <span style={s.tripDest}>{trip.destination}</span>
+                      {trip.start_date && (
+                        <span style={s.dates}>
+                          {' · '}{new Date(trip.start_date).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })}
+                          {trip.end_date && ` – ${new Date(trip.end_date).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })}`}
+                        </span>
+                      )}
+                      {trip.notes && <div style={s.tripNote}>{trip.notes}</div>}
+                    </div>
+                  </div>
+                );
+              })}
+              {trips.length > 3 && (
+                <button style={s.showMore} onClick={() => setExpanded(!expanded)}>
+                  {expanded ? 'Show less' : `+${trips.length - 3} more`}
+                </button>
+              )}
+            </div>
+          )}
+
+          {!loading && trips.length === 0 && !showForm && (
+            <div style={s.empty}>
+              <span style={{ color: C.muted, fontSize: 13 }}>No trips shared yet. </span>
+              <button style={s.inlineBtn} onClick={() => setShowForm(true)}>
+                Be the first
+              </button>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
@@ -165,6 +240,12 @@ const s: Record<string, React.CSSProperties> = {
     borderRadius: 20, padding: '6px 14px', fontSize: 12,
     fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' as const, flexShrink: 0,
   },
+  modeRow: { display: 'flex', gap: 6, marginTop: 14 },
+  modeBtn: {
+    background: C.soft, color: C.muted, border: 'none', borderRadius: 20,
+    padding: '5px 12px', fontSize: 11.5, fontWeight: 600, cursor: 'pointer',
+  },
+  modeBtnActive: { background: C.goldLight, color: C.goldDark },
   form: {
     marginTop: 14, display: 'flex', flexDirection: 'column', gap: 8,
     padding: 14, background: C.soft, borderRadius: 10,

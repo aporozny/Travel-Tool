@@ -1,5 +1,7 @@
 import { pool } from "../utils/db";
+import { redis } from "../utils/redis";
 import { sendSOSAlert, sendReviewerAlert } from "./notifications";
+import { reverseGeocodeCountry } from "./geocoding";
 import { safetyEmitter } from "../routes/safety";
 
 // Backend for the Drift Safety Line (inbound voice AI, see
@@ -97,6 +99,33 @@ export async function startCall(params: {
 	return { callId: callResult.rows[0].id, sosEventId, caller };
 }
 
+export interface CallerLocation {
+	countryCode: string;
+	countryName: string;
+	recordedAt: string;
+}
+
+// Single-user point lookup against the existing location:{userId} Redis
+// cache -- the same cache Trip Mode writes on every ping (see
+// utils/geoPresence.ts). This doesn't need the GEO presence layer at
+// all; it's not a proximity query, just "does Drift have a recent point
+// for this one caller." Returns null (never guesses) if there's no
+// cached point or the reverse-geocode fails.
+export async function getCallerLastLocation(userId: string): Promise<CallerLocation | null> {
+	const cached = await redis.get(`location:${userId}`);
+	if (!cached) return null;
+
+	const parsed = JSON.parse(cached);
+	const country = await reverseGeocodeCountry(parsed.latitude, parsed.longitude);
+	if (!country) return null;
+
+	return {
+		countryCode: country.countryCode,
+		countryName: country.countryName,
+		recordedAt: parsed.recorded_at,
+	};
+}
+
 export interface EmergencyNumberEntry {
 	serviceType: string;
 	number: string;
@@ -176,7 +205,7 @@ export async function recordBridgeAttempt(callId: string, connected: boolean): P
 // case they don't immediately place an unknown incoming call as urgent.
 export async function pageReviewerForLiveTransfer(callId: string): Promise<void> {
 	const { rows } = await pool.query(
-		`SELECT sac.caller_phone, t.first_name, t.last_name
+		`SELECT sac.caller_phone, sac.user_id, t.first_name, t.last_name
 		 FROM sos_ai_calls sac
 		 LEFT JOIN users u ON u.id = sac.user_id
 		 LEFT JOIN travelers t ON t.user_id = u.id
@@ -185,9 +214,25 @@ export async function pageReviewerForLiveTransfer(callId: string): Promise<void>
 	);
 	const call = rows[0];
 	const travelerName = call ? [call.first_name, call.last_name].filter(Boolean).join(" ") || call.caller_phone : "Unknown caller";
+
+	// Best-effort last-known-location line for the reviewer -- so they
+	// aren't starting blind either. A miss (no Trip Mode, no cache, reverse
+	// geocode failure) just omits the line; never blocks the page.
+	let locationLine = "";
+	if (call?.user_id) {
+		try {
+			const location = await getCallerLastLocation(call.user_id);
+			if (location) {
+				locationLine = `\nLast known location (Drift Trip Mode): ${location.countryName}, as of ${location.recordedAt} -- treat as a hint to confirm, not a fact.`;
+			}
+		} catch (err) {
+			console.error("pageReviewerForLiveTransfer: location lookup failed", err);
+		}
+	}
+
 	await sendReviewerAlert({
 		subject: "Drift Safety Line: live transfer incoming",
-		body: `A caller (${travelerName}) is being connected to you live right now via the Safety Line. Answer the incoming call immediately.`,
+		body: `A caller (${travelerName}) is being connected to you live right now via the Safety Line. Answer the incoming call immediately.${locationLine}`,
 		urgent: true,
 	});
 }

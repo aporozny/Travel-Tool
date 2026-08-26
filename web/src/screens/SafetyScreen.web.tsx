@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import api from '../services/api.web';
+import { TripModeToggle } from '../components/TripModeToggle.web';
 
 const C = {
   gold:      '#C9A84C',
@@ -412,6 +413,8 @@ export default function SafetyScreen() {
               <h3 style={s.sectionTitle}>Location Tracking</h3>
             </div>
 
+            <TripModeToggle />
+
             {/* Current location card */}
             <div style={s.formCard}>
               <h4 style={s.formTitle}>Share Your Location</h4>
@@ -447,7 +450,7 @@ export default function SafetyScreen() {
                     <div style={s.locCoords}>
                       {loc.latitude.toFixed(4)}, {loc.longitude.toFixed(4)}
                     </div>
-                    <a 
+                    <a
                       href={`https://maps.google.com/?q=${loc.latitude},${loc.longitude}`}
                       target="_blank"
                       rel="noopener noreferrer"
