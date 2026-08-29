@@ -214,7 +214,7 @@ async function queryCatalog(
 	const params: any[] = [];
 	const geoRes = geoConditions(geo, params, 1);
 	const conditions: string[] = [
-		`pc.source IN ('google_places_v2', 'google', 'foursquare', 'viator')`,
+		`pc.source IN ('google_places_v2', 'google', 'foursquare', 'viator', 'member')`,
 		`pc.expires_at > NOW()`,
 	];
 	let n = geoRes.nextIndex;

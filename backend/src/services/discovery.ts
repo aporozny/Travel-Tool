@@ -40,7 +40,7 @@ async function getDestinationSummaries(): Promise<DestinationSummary[]> {
 		       COUNT(*) AS place_count, COUNT(DISTINCT category) AS category_count
 		FROM places_cache
 		WHERE expires_at > NOW()
-		  AND source IN ('google_places_v2', 'google', 'foursquare', 'viator')
+		  AND source IN ('google_places_v2', 'google', 'foursquare', 'viator', 'member')
 		  AND country IS NOT NULL AND country != ''
 		GROUP BY region
 	`);
@@ -172,7 +172,7 @@ export async function getSpotlightPlaces(
 		   FROM places_cache pc
 		   WHERE pc.region = ANY($1)
 		     AND pc.expires_at > NOW()
-		     AND pc.source IN ('google_places_v2', 'google', 'foursquare', 'viator')
+		     AND pc.source IN ('google_places_v2', 'google', 'foursquare', 'viator', 'member')
 		 ) ranked
 		 WHERE rn <= $2
 		 ORDER BY region, rn`,

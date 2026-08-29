@@ -103,6 +103,7 @@ export interface RecommendationResult {
 		rating_boost: number;
 		claimed_bonus: number;
 		social: number;
+		corroboration: number;
 	};
 	// Community interest for UI ("N travellers saved this recently")
 	community: { saves: number; books: number };
@@ -220,6 +221,11 @@ export function scoreOperator(
 	targetRegion?: string,
 	social?: SocialSignal,
 	affinities?: UserAffinities,
+	// Distinct travelers who've posted about this exact place -- the
+	// corroboration signal for member-sourced places (Stage 13). 0 for
+	// operators and places nobody has posted about; not a penalty, just
+	// no bonus yet.
+	postAuthorCount = 0,
 ): RecommendationResult["score_breakdown"] {
 	const breakdown = {
 		activity: 0,
@@ -230,6 +236,7 @@ export function scoreOperator(
 		rating_boost: 0,
 		claimed_bonus: 0,
 		social: 0,
+		corroboration: 0,
 	};
 
 	const opTags: string[] = op.tags || [];
@@ -373,6 +380,15 @@ export function scoreOperator(
 
 	// --- Community interest (0-15) ---
 	breakdown.social = socialScore(social);
+
+	// --- Corroboration (0-5): 2+ independent travelers posting about the
+	// same place is a real trust signal, distinct from generic engagement
+	// (which socialScore already covers). A single, unconfirmed submission
+	// scores neutrally -- this is a bonus for corroboration, not a penalty
+	// for being new.
+	if (postAuthorCount >= 2) {
+		breakdown.corroboration = Math.min(5, (postAuthorCount - 1) * 2);
+	}
 
 	return breakdown;
 }
@@ -576,10 +592,12 @@ export async function getRecommendations(
            pc.latitude, pc.longitude,
            pc.website, pc.phone, pc.tags, pc.price_level, pc.photos,
            pc.is_claimed, false AS is_verified,
-           pc.rating, pc.review_count
+           pc.rating, pc.review_count,
+           (SELECT COUNT(DISTINCT cp2.author_id) FROM community_posts cp2
+            WHERE cp2.place_id = pc.id AND cp2.is_deleted = false) AS post_author_count
     FROM places_cache pc
     WHERE pc.expires_at > NOW()
-  AND pc.source IN ('google_places_v2', 'google', 'foursquare', 'viator')
+  AND pc.source IN ('google_places_v2', 'google', 'foursquare', 'viator', 'member')
   `;
 	const placeParams: any[] = [];
 	let placeParamCount = 1;
@@ -626,6 +644,7 @@ export async function getRecommendations(
 		rating_boost: 0,
 		claimed_bonus: 0,
 		social: 0,
+		corroboration: 0,
 	});
 
 	const toResult = (
@@ -673,6 +692,7 @@ export async function getRecommendations(
 					region,
 					socialMap.get(item.id),
 					affinities,
+					item.post_author_count || 0,
 				);
 				return toResult(item, breakdown, totalScore(breakdown));
 			}

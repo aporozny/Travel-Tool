@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { pool } from '../utils/db';
 import { authenticate, AuthenticatedRequest } from '../middleware/authenticate';
+import { resolveOrCreatePlace, DailyPlaceLimitError } from '../services/memberPlaces';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
@@ -23,6 +24,18 @@ const createPostSchema = z.object({
   lat: z.number().min(-90).max(90).optional(),
   lng: z.number().min(-180).max(180).optional(),
   placeId: z.string().uuid().optional(),
+  // Tag a place the catalog doesn't have yet -- resolved (matched to an
+  // existing place) or created (source='member') in memberPlaces.ts before
+  // the post itself is inserted. Mutually meaningful with placeId, but not
+  // enforced as exclusive here -- if both are somehow sent, placeId wins
+  // (see the handler below), same "explicit reference beats a derived one"
+  // rule as everywhere else this pattern shows up.
+  newPlace: z.object({
+    name: z.string().min(1).max(200),
+    lat: z.number().min(-90).max(90),
+    lng: z.number().min(-180).max(180),
+    category: z.enum(['food', 'accommodation', 'activity', 'transport']),
+  }).optional(),
   operatorId: z.string().uuid().optional(),
   visibility: z.enum(['public', 'connections', 'private']).default('public'),
   mediaUrls: z.array(z.string()).max(5).optional(),
@@ -178,6 +191,28 @@ communityRouter.post('/posts', authenticate, async (req: AuthenticatedRequest, r
     );
     const authorType = operatorCheck.rows.length > 0 ? 'operator' : 'member';
 
+    // Resolve a tagged-but-not-yet-cataloged place before the post itself is
+    // inserted -- either matches an existing places_cache row (the
+    // corroboration path) or creates a new source='member' one.
+    let resolvedPlaceId = body.placeId ?? null;
+    if (!resolvedPlaceId && body.newPlace) {
+      try {
+        resolvedPlaceId = await resolveOrCreatePlace({
+          name: body.newPlace.name,
+          lat: body.newPlace.lat,
+          lng: body.newPlace.lng,
+          region: body.region || '',
+          category: body.newPlace.category,
+          submittedBy: req.user!.id,
+        });
+      } catch (err) {
+        if (err instanceof DailyPlaceLimitError) {
+          return res.status(429).json({ message: err.message });
+        }
+        throw err;
+      }
+    }
+
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
@@ -188,7 +223,7 @@ communityRouter.post('/posts', authenticate, async (req: AuthenticatedRequest, r
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
          RETURNING id, created_at`,
         [req.user!.id, authorType, body.body ?? null, body.region ?? null,
-         body.lat ?? null, body.lng ?? null, body.placeId ?? null,
+         body.lat ?? null, body.lng ?? null, resolvedPlaceId,
          body.operatorId ?? null, body.visibility]
       );
 
@@ -209,6 +244,7 @@ communityRouter.post('/posts', authenticate, async (req: AuthenticatedRequest, r
       return res.status(201).json({
         postId,
         createdAt: post.rows[0].created_at,
+        placeId: resolvedPlaceId,
       });
     } catch (err) {
       await client.query('ROLLBACK');

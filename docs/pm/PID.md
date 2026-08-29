@@ -63,6 +63,7 @@ See PRODUCT-DESCRIPTIONS.md. Summary:
 | Stage 10 | Booking ecosystem Phase 2: flights via Duffel | **Live** — real booking completed end-to-end on production (M6UT4V); one-way/return-date/card-form UX fixes shipped — see STAGE-PLAN-10.md |
 | Stage 11 | Booking ecosystem Phase 3: stays/hotels via Duffel | Search built and verified correct against the real API; blocked on Duffel enabling Stays for the account (403, confirmed live) — see STAGE-PLAN-11.md |
 | Stage 12 | Trip Mode: opt-in live location feeding Safety Line auto-context and live proximity matching | Complete — see STAGE-PLAN-12.md |
+| Stage 13 | Member-sourced places: travelers add real places into search via trip posts, verified by corroboration | Complete — see STAGE-PLAN-13.md |
 
 ## 5. Project controls
 - **Tolerances:** Stage 1 time ±1 session; scope: P1–P6 fixed, no gold-plating. Escalate to Executive if any product cannot be delivered.

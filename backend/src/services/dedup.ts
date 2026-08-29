@@ -38,7 +38,10 @@ export function metersApart(
 	return 6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-function sameVenue(a: any, b: any): boolean {
+// Exported so submission-time flows (member-sourced places) can run the
+// exact same fuzzy match used for serve-time cross-source dedup below,
+// rather than reimplementing "is this the same real-world venue."
+export function sameVenue(a: any, b: any): boolean {
 	if (normalizeName(a.name) !== normalizeName(b.name)) return false;
 	if (a.latitude == null || b.latitude == null) return true; // name-only match
 	return (

@@ -28,6 +28,13 @@ const REGIONS = [
   'Nusa Dua', 'Candidasa', 'Munduk', 'Sidemen',
 ];
 
+const PLACE_CATEGORIES = [
+  { key: 'food', label: 'Food & drink' },
+  { key: 'accommodation', label: 'Accommodation' },
+  { key: 'activity', label: 'Activity' },
+  { key: 'transport', label: 'Transport' },
+];
+
 interface Post {
   id: string;
   body: string;
@@ -263,12 +270,42 @@ function PostCard({ post, onReact, onComment }: {
 
 // ─── Compose Modal ────────────────────────────────────────────────────────────
 
+interface PlaceSearchResult {
+  id: string;
+  name: string;
+  category: string;
+  region: string;
+}
+
+interface GeocodedPoint {
+  latitude: number;
+  longitude: number;
+  name: string;
+  country: string;
+}
+
 function ComposeModal({ onClose, onPosted }: { onClose: () => void; onPosted: () => void }) {
   const [body, setBody] = useState('');
   const [region, setRegion] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [images, setImages] = useState<string[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // Place tagging -- pick an existing catalog place, or add one the
+  // catalog doesn't have yet (member-sourced places, Stage 13).
+  const [placeQuery, setPlaceQuery] = useState('');
+  const [placeResults, setPlaceResults] = useState<PlaceSearchResult[]>([]);
+  const [searchingPlace, setSearchingPlace] = useState(false);
+  const [selectedPlace, setSelectedPlace] = useState<PlaceSearchResult | null>(null);
+  const placeSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const [showAddPlace, setShowAddPlace] = useState(false);
+  const [newPlaceName, setNewPlaceName] = useState('');
+  const [newPlaceCategory, setNewPlaceCategory] = useState('activity');
+  const [newPlaceAddress, setNewPlaceAddress] = useState('');
+  const [geocoding, setGeocoding] = useState(false);
+  const [geocodedPoint, setGeocodedPoint] = useState<GeocodedPoint | null>(null);
+  const [geocodeError, setGeocodeError] = useState<string | null>(null);
 
   const handleImage = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
@@ -290,19 +327,87 @@ function ComposeModal({ onClose, onPosted }: { onClose: () => void; onPosted: ()
     });
   };
 
+  const handlePlaceQueryChange = (value: string) => {
+    setPlaceQuery(value);
+    if (placeSearchTimer.current) clearTimeout(placeSearchTimer.current);
+    if (!value.trim()) {
+      setPlaceResults([]);
+      return;
+    }
+    placeSearchTimer.current = setTimeout(async () => {
+      setSearchingPlace(true);
+      try {
+        const params: any = { q: value.trim(), limit: 6 };
+        if (region) params.region = region;
+        const res = await api.get('/search', { params });
+        setPlaceResults(res.data?.results || []);
+      } catch (e) {
+        console.error(e);
+      } finally {
+        setSearchingPlace(false);
+      }
+    }, 350);
+  };
+
+  const handleSelectPlace = (place: PlaceSearchResult) => {
+    setSelectedPlace(place);
+    setPlaceQuery('');
+    setPlaceResults([]);
+    setShowAddPlace(false);
+  };
+
+  const handleGeocodeAddress = async () => {
+    if (!newPlaceAddress.trim()) return;
+    setGeocoding(true);
+    setGeocodeError(null);
+    setGeocodedPoint(null);
+    try {
+      const res = await api.get('/search/geocode', { params: { address: newPlaceAddress.trim() } });
+      setGeocodedPoint(res.data);
+    } catch (e) {
+      setGeocodeError("Couldn't find that location. Try a more specific address.");
+    } finally {
+      setGeocoding(false);
+    }
+  };
+
+  const clearPlace = () => {
+    setSelectedPlace(null);
+    setShowAddPlace(false);
+    setNewPlaceName('');
+    setNewPlaceAddress('');
+    setGeocodedPoint(null);
+    setGeocodeError(null);
+  };
+
   const handleSubmit = async () => {
     if (!body.trim() && images.length === 0) return;
     setSubmitting(true);
     try {
-      await api.post('/community/posts', {
+      const payload: any = {
         body: body.trim() || undefined,
         region: region || undefined,
         mediaUrls: images,
         visibility: 'public',
-      });
+      };
+      if (selectedPlace) {
+        payload.placeId = selectedPlace.id;
+      } else if (newPlaceName.trim() && geocodedPoint) {
+        payload.newPlace = {
+          name: newPlaceName.trim(),
+          lat: geocodedPoint.latitude,
+          lng: geocodedPoint.longitude,
+          category: newPlaceCategory,
+        };
+      }
+      await api.post('/community/posts', payload);
       onPosted();
-    } catch (e) {
-      console.error(e);
+    } catch (e: any) {
+      if (e.response?.status === 429) {
+        alert(e.response.data?.message || "You've added a lot of new places today -- try again tomorrow.");
+      } else {
+        console.error(e);
+      }
     } finally {
       setSubmitting(false);
     }
@@ -343,6 +448,97 @@ function ComposeModal({ onClose, onPosted }: { onClose: () => void; onPosted: ()
             ))}
           </div>
         )}
+
+        {/* Place tagging */}
+        <div style={styles.placeSection}>
+          {selectedPlace || (newPlaceName.trim() && geocodedPoint) ? (
+            <div style={styles.selectedPlaceChip}>
+              <span style={{ marginRight: 6 }}>◎</span>
+              <span style={{ flex: 1 }}>{selectedPlace ? selectedPlace.name : newPlaceName.trim()}</span>
+              {!selectedPlace && <span style={styles.newPlaceBadge}>new</span>}
+              <button style={styles.clearPlaceBtn} onClick={clearPlace}>✕</button>
+            </div>
+          ) : (
+            <>
+              <input
+                style={styles.placeSearchInput}
+                placeholder="Tag a place you visited..."
+                value={placeQuery}
+                onChange={e => handlePlaceQueryChange(e.target.value)}
+              />
+              {placeQuery.trim() && (
+                <div style={styles.placeResultsBox}>
+                  {searchingPlace ? (
+                    <div style={styles.placeResultRow}>Searching...</div>
+                  ) : placeResults.length > 0 ? (
+                    placeResults.map(p => (
+                      <div
+                        key={p.id}
+                        style={styles.placeResultRow}
+                        onClick={() => handleSelectPlace(p)}
+                      >
+                        {p.name}
+                        <span style={styles.placeResultCategory}>{p.category}</span>
+                      </div>
+                    ))
+                  ) : (
+                    <div style={styles.placeResultRow}>No matches</div>
+                  )}
+                  <div
+                    style={{ ...styles.placeResultRow, color: C.goldDark, fontWeight: 600 }}
+                    onClick={() => { setShowAddPlace(true); setNewPlaceName(placeQuery); setPlaceQuery(''); setPlaceResults([]); }}
+                  >
+                    Can't find it? Add the place
+                  </div>
+                </div>
+              )}
+              {!placeQuery.trim() && !showAddPlace && (
+                <button style={styles.addPlaceLink} onClick={() => setShowAddPlace(true)}>
+                  Can't find it? Add the place
+                </button>
+              )}
+            </>
+          )}
+
+          {showAddPlace && !selectedPlace && (
+            <div style={styles.addPlaceForm}>
+              <input
+                style={styles.addPlaceInput}
+                placeholder="Place name"
+                value={newPlaceName}
+                onChange={e => setNewPlaceName(e.target.value)}
+              />
+              <select
+                style={styles.addPlaceInput}
+                value={newPlaceCategory}
+                onChange={e => setNewPlaceCategory(e.target.value)}
+              >
+                {PLACE_CATEGORIES.map(c => (
+                  <option key={c.key} value={c.key}>{c.label}</option>
+                ))}
+              </select>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input
+                  style={{ ...styles.addPlaceInput, flex: 1 }}
+                  placeholder="Address or area (e.g. Jl. Pantai Berawa, Canggu)"
+                  value={newPlaceAddress}
+                  onChange={e => { setNewPlaceAddress(e.target.value); setGeocodedPoint(null); }}
+                />
+                <button
+                  style={styles.findLocationBtn}
+                  onClick={handleGeocodeAddress}
+                  disabled={geocoding || !newPlaceAddress.trim()}
+                >
+                  {geocoding ? '...' : 'Find'}
+                </button>
+              </div>
+              {geocodeError && <div style={styles.geocodeError}>{geocodeError}</div>}
+              {geocodedPoint && (
+                <div style={styles.geocodeConfirm}>Located: {geocodedPoint.name}, {geocodedPoint.country}</div>
+              )}
+            </div>
+          )}
+        </div>
 
         <div style={styles.composeFooter}>
           <div style={styles.composeActions}>
@@ -623,6 +819,58 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 10, cursor: 'pointer', display: 'flex',
     alignItems: 'center', justifyContent: 'center',
   },
+
+  // Place tagging
+  placeSection: { padding: '0 24px 12px', position: 'relative' as const },
+  placeSearchInput: {
+    width: '100%', border: `1px solid ${C.border}`, borderRadius: 10,
+    padding: '9px 12px', fontSize: 13, outline: 'none',
+    background: C.soft, boxSizing: 'border-box' as const,
+  },
+  placeResultsBox: {
+    marginTop: 4, border: `1px solid ${C.border}`, borderRadius: 10,
+    background: C.white, boxShadow: '0 4px 16px rgba(0,0,0,0.06)',
+    overflow: 'hidden',
+  },
+  placeResultRow: {
+    padding: '9px 12px', fontSize: 13, color: C.text, cursor: 'pointer',
+    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+    borderBottom: `1px solid ${C.border}`,
+  },
+  placeResultCategory: { fontSize: 11, color: C.muted, textTransform: 'capitalize' as const },
+  addPlaceLink: {
+    background: 'none', border: 'none', color: C.goldDark, fontSize: 12.5,
+    fontWeight: 600, cursor: 'pointer', padding: '6px 0 0', textAlign: 'left' as const,
+  },
+  selectedPlaceChip: {
+    display: 'flex', alignItems: 'center', gap: 4,
+    background: C.goldLight, color: C.goldDark, borderRadius: 10,
+    padding: '9px 12px', fontSize: 13, fontWeight: 600,
+  },
+  newPlaceBadge: {
+    background: C.gold, color: '#fff', fontSize: 10, fontWeight: 700,
+    borderRadius: 6, padding: '2px 6px', marginRight: 6,
+  },
+  clearPlaceBtn: {
+    background: 'none', border: 'none', color: C.goldDark, cursor: 'pointer',
+    fontSize: 13, padding: 2,
+  },
+  addPlaceForm: {
+    marginTop: 8, display: 'flex', flexDirection: 'column' as const, gap: 6,
+    padding: 12, background: C.soft, borderRadius: 10,
+  },
+  addPlaceInput: {
+    border: `1px solid ${C.border}`, borderRadius: 8, padding: '8px 10px',
+    fontSize: 13, outline: 'none', background: C.white,
+    boxSizing: 'border-box' as const, width: '100%',
+  },
+  findLocationBtn: {
+    background: C.gold, color: '#fff', border: 'none', borderRadius: 8,
+    padding: '0 14px', fontSize: 12.5, fontWeight: 600, cursor: 'pointer',
+  },
+  geocodeError: { fontSize: 11.5, color: '#C62828' },
+  geocodeConfirm: { fontSize: 11.5, color: '#10B981', fontWeight: 600 },
+
   composeFooter: {
     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
     padding: '12px 24px 20px', borderTop: `1px solid ${C.border}`,

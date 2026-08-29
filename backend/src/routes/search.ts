@@ -6,6 +6,7 @@ import {
 	enrichPlace,
 	getSubregions,
 } from "../services/searchCache";
+import { geocodeDestination } from "../services/geocoding";
 import { pool } from "../utils/db";
 import { authenticate, AuthenticatedRequest } from "../middleware/authenticate";
 
@@ -53,6 +54,35 @@ searchRouter.get("/", async (req: Request, res: Response) => {
 		}
 		console.error(err);
 		return res.status(500).json({ message: "Search failed" });
+	}
+});
+
+// GET /api/v1/search/geocode?address=... — resolve a free-text address to
+// coordinates, for the "can't find it? add it" place-creation flow
+// (member-sourced places, Stage 13). Thin wrapper over the same
+// geocodeDestination() that already powers region search — no new Google
+// key/quota, same 90-day cache.
+searchRouter.get("/geocode", async (req: Request, res: Response) => {
+	try {
+		const address = z.string().min(1).max(200).parse(req.query.address);
+		const result = await geocodeDestination(address);
+		if (!result) {
+			return res.status(404).json({ message: "Could not resolve that location" });
+		}
+		return res.json({
+			latitude: result.latitude,
+			longitude: result.longitude,
+			name: result.name,
+			country: result.country,
+		});
+	} catch (err) {
+		if (err instanceof z.ZodError) {
+			return res
+				.status(400)
+				.json({ message: "Validation error", errors: err.errors });
+		}
+		console.error(err);
+		return res.status(500).json({ message: "Internal server error" });
 	}
 });
 
