@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { pool } from '../utils/db';
 import { redis } from '../utils/redis';
 import { authenticate, AuthenticatedRequest } from '../middleware/authenticate';
-import { sendSOSAlert } from '../services/notifications';
+import { sendSOSAlert, sendReviewerAlert } from '../services/notifications';
 import { getLatestConsent, recordConsent } from '../services/consent';
 import { upsertPresence, removePresence } from '../utils/geoPresence';
 
@@ -238,6 +238,34 @@ safetyRouter.post('/sos', authenticate, async (req: AuthenticatedRequest, res: R
 import { EventEmitter } from 'events';
 export const safetyEmitter = new EventEmitter();
 safetyEmitter.setMaxListeners(500);
+
+// The other end of the 'report:critical' emit in POST /reports below --
+// without this, a severity-4 report (harassment, safety_concern) was
+// logged to the DB and the event fired, but nothing was ever listening,
+// so no human ever actually found out. Same reviewer-alert path already
+// proven working for Safety Line escalations (R13).
+safetyEmitter.on('report:critical', (report: {
+  reportId: string; category: string; description: string;
+  reportedTravelerId: string | null; reportedOperatorId: string | null;
+  reportedPlaceCacheId: string | null; isAnonymous: boolean;
+}) => {
+  const target = report.reportedTravelerId
+    ? `traveler ${report.reportedTravelerId}`
+    : report.reportedOperatorId
+      ? `operator ${report.reportedOperatorId}`
+      : `place ${report.reportedPlaceCacheId}`;
+  sendReviewerAlert({
+    subject: `Critical community report: ${report.category}`,
+    body: [
+      `Category: ${report.category}`,
+      `Target: ${target}`,
+      `Reporter: ${report.isAnonymous ? 'anonymous' : 'identified, see safety_reports table'}`,
+      `Description: ${report.description}`,
+      `safety_reports id: ${report.reportId}`,
+    ].join('\n'),
+    urgent: true,
+  }).catch((err) => console.error('Critical report reviewer alert failed:', err));
+});
 
 // ─── PILLAR 1: IDENTITY VERIFICATION ─────────────────────────────────────────
 
@@ -564,6 +592,7 @@ safetyRouter.get('/sos/:id/stream', async (req: any, res: Response) => {
 const reportSchema = z.object({
   reportedTravelerId: z.string().uuid().optional(),
   reportedOperatorId: z.string().uuid().optional(),
+  reportedPlaceCacheId: z.string().uuid().optional(),
   category: z.enum(['harassment','fake_profile','scam','inappropriate_content',
                     'safety_concern','operator_misconduct','no_show','other']),
   description: z.string().min(10).max(2000),
@@ -575,8 +604,8 @@ const reportSchema = z.object({
 safetyRouter.post('/reports', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const body = reportSchema.parse(req.body);
-    if (!body.reportedTravelerId && !body.reportedOperatorId) {
-      return res.status(400).json({ message: 'Must report a traveler or operator' });
+    if (!body.reportedTravelerId && !body.reportedOperatorId && !body.reportedPlaceCacheId) {
+      return res.status(400).json({ message: 'Must report a traveler, operator, or place' });
     }
 
     const severityMap: Record<string, number> = {
@@ -584,21 +613,37 @@ safetyRouter.post('/reports', authenticate, async (req: AuthenticatedRequest, re
       fake_profile: 2, inappropriate_content: 2, no_show: 2, other: 1,
     };
 
+    // Note: is_anonymous was never a real column on safety_reports (this
+    // INSERT 500'd for every submission before this fix, for any category
+    // -- found live while verifying the report-a-place wiring below).
+    // Accepting isAnonymous in the request body for forward compatibility,
+    // but not persisting it until a real column/redaction design exists.
     const result = await pool.query(
       `INSERT INTO safety_reports
-         (reporter_id, reported_traveler_id, reported_operator_id,
-          category, description, trip_id, severity, is_anonymous)
+         (reporter_id, reported_traveler_id, reported_operator_id, reported_place_cache_id,
+          category, description, trip_id, severity)
        SELECT t.id, $1, $2, $3, $4, $5, $6, $7
        FROM travelers t WHERE t.user_id = $8
        RETURNING id, created_at`,
-      [body.reportedTravelerId ?? null, body.reportedOperatorId ?? null,
+      [body.reportedTravelerId ?? null, body.reportedOperatorId ?? null, body.reportedPlaceCacheId ?? null,
        body.category, body.description, body.tripId ?? null,
-       severityMap[body.category] ?? 2, body.isAnonymous, req.user!.id]
+       severityMap[body.category] ?? 2, req.user!.id]
     );
 
-    // Alert admins if critical
+    // Alert admins if critical -- carries the real details so the listener
+    // below doesn't have to re-query, and a genuinely urgent report (a
+    // person, not just a listing) actually pages a human, not just an
+    // event firing into a void nothing was ever listening on.
     if (severityMap[body.category] >= 4) {
-      safetyEmitter.emit('report:critical', { reportId: result.rows[0].id });
+      safetyEmitter.emit('report:critical', {
+        reportId: result.rows[0].id,
+        category: body.category,
+        description: body.description,
+        reportedTravelerId: body.reportedTravelerId ?? null,
+        reportedOperatorId: body.reportedOperatorId ?? null,
+        reportedPlaceCacheId: body.reportedPlaceCacheId ?? null,
+        isAnonymous: body.isAnonymous,
+      });
     }
 
     return res.status(201).json({
