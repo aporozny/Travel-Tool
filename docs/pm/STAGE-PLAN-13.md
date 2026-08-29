@@ -45,6 +45,15 @@ All run against real production containers on the VPS, using the existing seeded
 
 While deploying, discovered the rotation attempted earlier had created the new key in the wrong Google Cloud project ("Drift Travel" — confirmed via its Metrics dashboard showing **zero requests ever**, over 30 days). The actual production traffic has been running through a different project ("Openclaw") the whole time, under an old, unrestricted 33-API key created back in April — the exact R10 exposure this rotation was meant to fix. A new key was created in the correct project, restricted to Geocoding API + Places API + the VPS's IP address, live-tested against both APIs (`STATUS: OK` on Geocoding, real results from Places (New)), and deployed. **Follow-up still open**: delete the old unrestricted "Maps Platform API Key" (33 APIs) in the Openclaw project once the new key's stability is confirmed over a few days.
 
+## Self-review pass, same day (2026-08-29)
+
+Reviewed the just-shipped diff for correctness before calling this done. Found and fixed three real issues:
+- `enrichPlace()` was firing on every member-place detail view, calling Google Place Details with the synthetic `member:<uuid>` external_id -- a call that can never succeed, burns real quota, and logged an error every time. Guarded against `source === 'member'` in `search.ts`.
+- `POST /community/posts` accepted `newPlace` with no `region`, which would have created a `places_cache` row search/discovery could never meaningfully filter by. Now requires a region when adding a new place.
+- The compose modal silently swallowed any non-429 error from the post endpoint -- a user hitting the new region validation (or any other 400) would have seen nothing happen at all. Now surfaces the actual server message.
+
+Verified live: confirmed no enrich/error log line fires for a member place detail view after the fix. Committed separately (`5dbc070`).
+
 ## Quality gate
 - [x] Direct research against the live repo (schema, routes, the four hardcoded source lists, existing dedup/sub-area/claim infrastructure) before any design
 - [x] Plan reviewed and approved by the Executive before implementation, including two explicit scope decisions (visibility, entry point)
