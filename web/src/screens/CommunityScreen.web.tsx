@@ -403,10 +403,14 @@ function ComposeModal({ onClose, onPosted }: { onClose: () => void; onPosted: ()
       await api.post('/community/posts', payload);
       onPosted();
     } catch (e: any) {
+      const message = e.response?.data?.message;
       if (e.response?.status === 429) {
-        alert(e.response.data?.message || "You've added a lot of new places today -- try again tomorrow.");
+        alert(message || "You've added a lot of new places today -- try again tomorrow.");
+      } else if (message) {
+        alert(message);
       } else {
         console.error(e);
+        alert('Could not post. Please try again.');
       }
     } finally {
       setSubmitting(false);

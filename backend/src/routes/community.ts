@@ -196,6 +196,9 @@ communityRouter.post('/posts', authenticate, async (req: AuthenticatedRequest, r
     // corroboration path) or creates a new source='member' one.
     let resolvedPlaceId = body.placeId ?? null;
     if (!resolvedPlaceId && body.newPlace) {
+      if (!body.region) {
+        return res.status(400).json({ message: 'Pick a region before adding a new place -- it needs somewhere to be found later.' });
+      }
       try {
         resolvedPlaceId = await resolveOrCreatePlace({
           name: body.newPlace.name,

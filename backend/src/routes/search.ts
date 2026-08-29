@@ -110,8 +110,12 @@ searchRouter.get("/places/:id", async (req: Request, res: Response) => {
 		const place = await getPlaceById(req.params.id);
 		if (!place) return res.status(404).json({ message: "Place not found" });
 
-		// Enrich in background if phone/website missing
-		if (!place.phone || !place.website) {
+		// Enrich in background if phone/website missing -- never for
+		// member-sourced places (Stage 13): their external_id is a synthetic
+		// "member:<uuid>" value, not a real Google place ID, so this would
+		// otherwise burn a real Google API call every single view that can
+		// never succeed, log an error, and never actually enrich anything.
+		if ((!place.phone || !place.website) && place.source !== "member") {
 			enrichPlace(place.id, place.external_id).catch(() => {});
 		}
 
