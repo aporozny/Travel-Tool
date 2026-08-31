@@ -283,8 +283,13 @@ membersRouter.get('/nearby', authenticate, async (req: AuthenticatedRequest, res
          ORDER BY start_date ASC NULLS LAST
          LIMIT 1
        ) mt ON true
-       WHERE u.id = ANY($1) AND u.is_active = true AND t.show_in_directory = true`,
-      [userIds]
+       WHERE u.id = ANY($1) AND u.is_active = true AND t.show_in_directory = true
+         AND NOT EXISTS (
+           SELECT 1 FROM user_blocks b
+           WHERE (b.blocker_id = $2 AND b.blocked_id = u.id)
+              OR (b.blocker_id = u.id AND b.blocked_id = $2)
+         )`,
+      [userIds, req.user!.id]
     );
 
     const byId = new Map(result.rows.map(r => [r.user_id, r]));
@@ -409,6 +414,41 @@ membersRouter.post('/:userId/connect', authenticate, async (req: AuthenticatedRe
     if (err instanceof z.ZodError) {
       return res.status(400).json({ message: 'Validation error', errors: err.errors });
     }
+    console.error(err);
+    return res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+// POST /api/v1/members/:userId/block
+// Blocking is separate from reporting (POST /safety/reports) -- reporting
+// flags someone for review, blocking just removes them from your own view
+// (Trip Mode nearby results, messaging) with no review step, immediately.
+membersRouter.post('/:userId/block', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (req.params.userId === req.user!.id) {
+      return res.status(400).json({ message: 'Cannot block yourself' });
+    }
+    await pool.query(
+      `INSERT INTO user_blocks (blocker_id, blocked_id) VALUES ($1, $2)
+       ON CONFLICT (blocker_id, blocked_id) DO NOTHING`,
+      [req.user!.id, req.params.userId]
+    );
+    return res.status(204).send();
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+// DELETE /api/v1/members/:userId/block
+membersRouter.delete('/:userId/block', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    await pool.query(
+      `DELETE FROM user_blocks WHERE blocker_id = $1 AND blocked_id = $2`,
+      [req.user!.id, req.params.userId]
+    );
+    return res.status(204).send();
+  } catch (err) {
     console.error(err);
     return res.status(500).json({ message: 'Internal server error' });
   }

@@ -155,11 +155,27 @@ messagesRouter.post('/', authenticate, async (req: AuthenticatedRequest, res: Re
       return res.status(403).json({ message: 'You must be connected to send messages' });
     }
 
+    const blockResult = await pool.query(
+      `SELECT 1 FROM user_blocks
+       WHERE (blocker_id = $1 AND blocked_id = $2)
+          OR (blocker_id = $2 AND blocked_id = $1)`,
+      [req.user!.id, body.recipient_id]
+    );
+
+    if (blockResult.rows.length > 0) {
+      return res.status(403).json({ message: 'You cannot message this member' });
+    }
+
+    // connection_id is NOT NULL on member_messages -- connResult above
+    // already looked this row up to verify the connection exists; this was
+    // previously discarded and never passed to the INSERT, which made
+    // every message send 500 (found live while verifying the block
+    // feature below, not related to blocking itself).
     const result = await pool.query(
-      `INSERT INTO member_messages (id, sender_id, recipient_id, body)
-       VALUES (gen_random_uuid(), $1, $2, $3)
+      `INSERT INTO member_messages (id, connection_id, sender_id, recipient_id, body)
+       VALUES (gen_random_uuid(), $1, $2, $3, $4)
        RETURNING id, body, created_at, is_read, sender_id`,
-      [req.user!.id, body.recipient_id, body.body]
+      [connResult.rows[0].id, req.user!.id, body.recipient_id, body.body]
     );
 
     return res.status(201).json(result.rows[0]);

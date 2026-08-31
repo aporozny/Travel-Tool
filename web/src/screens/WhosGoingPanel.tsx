@@ -62,6 +62,28 @@ export function WhosGoingPanel({ region }: WhosGoingProps) {
       .finally(() => setNearLoading(false));
   };
 
+  // Trip Mode surfaces strangers by live proximity, not just people you've
+  // connected with -- report reuses the existing community-reporting
+  // endpoint, block is local-only (removes them from your own nearby view,
+  // no review step) and doesn't affect what they see of you elsewhere.
+  const handleReport = (userId: string, name: string) => {
+    const description = window.prompt(`Report ${name} to the Drift safety team. What happened? (at least 10 characters)`);
+    if (!description || description.trim().length < 10) return;
+    api.post('/safety/reports', {
+      reportedTravelerId: userId,
+      category: 'safety_concern',
+      description: description.trim(),
+    }).then(() => window.alert('Report submitted. Our team will review within 24 hours.'))
+      .catch(() => window.alert('Could not submit report. Please try again.'));
+  };
+
+  const handleBlock = (userId: string, name: string) => {
+    if (!window.confirm(`Block ${name}? They'll no longer appear in your nearby list, and you won't be able to message each other. You can undo this later.`)) return;
+    api.post(`/members/${userId}/block`)
+      .then(() => setNearby(prev => prev.filter(m => m.user_id !== userId)))
+      .catch(() => window.alert('Could not block this member. Please try again.'));
+  };
+
   useEffect(() => { loadTrips(); }, [region]);
   useEffect(() => { if (nearMode) loadNearby(); }, [nearMode, tripModeOn]);
 
@@ -142,6 +164,12 @@ export function WhosGoingPanel({ region }: WhosGoingProps) {
                       <span style={s.memberName}>{m.member_name}</span>
                       <span style={s.dates}> · {m.distance_km} km away</span>
                       {m.destination && <div style={s.tripNote}>Heading to {m.destination}</div>}
+                    </div>
+                    <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                      <button style={{ ...s.inlineBtn, color: C.muted, fontWeight: 500 }}
+                        onClick={() => handleReport(m.user_id, m.member_name)}>Report</button>
+                      <button style={{ ...s.inlineBtn, color: C.muted, fontWeight: 500 }}
+                        onClick={() => handleBlock(m.user_id, m.member_name)}>Block</button>
                     </div>
                   </div>
                 );
