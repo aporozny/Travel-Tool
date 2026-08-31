@@ -33,8 +33,8 @@ Bali/AU mockup set: https://claude.ai/code/artifact/59a67d0d-9899-41a6-9707-4365
 
 ## Blockers to clear before any paid spend
 
-- [ ] **Bali/AU landing page has no real hosted URL.** It only exists as a login-gated claude.ai artifact. Needs to live on `drifttravel.app` (or a subdomain) before Ads Manager can use it as a destination.
-- [ ] **No Privacy Policy/ToS exists** (RISK-REGISTER R14). Both Meta and TikTok ad review require a privacy policy link, and Trip Mode collects live location — non-negotiable before paid runs.
+- [ ] **Bali/AU landing page has no real hosted URL.** It only exists as a login-gated claude.ai artifact. Needs to live on `drifttravel.app` (or a subdomain) before Ads Manager can use it as a destination. **A ready-made pattern for this now exists** (built 2026-08-30 for the Privacy Policy below): nginx serves `/var/www/drift/legal/*.html` directly via a `location ^~ /legal/` block, deliberately outside `web/dist` so a frontend rebuild never wipes it. The same approach — export the landing page HTML, drop it in a new `/var/www/drift/campaigns/` (or similar) directory, add one more `location ^~` block — would solve this with no new infrastructure.
+- [x] **Privacy Policy/ToS — resolved 2026-08-30.** Live at https://drifttravel.app/legal/privacy-terms.html (Andre approved publishing the draft as-is, DRAFT banner and NEEDS-LEGAL-INPUT gaps intentionally left visible — see RISK-REGISTER R14). This is a real, linkable URL usable for Meta/TikTok ad review right now. Signup also now requires accepting it via a real checkbox, logged to `consent_records`.
 - [ ] **Seller-of-Travel legal review (R9) still outstanding**, and live bookings are already running. Flag to whoever owns legal before scaling paid spend that drives more of the same traffic.
 
 ## Setup checklist
@@ -76,4 +76,4 @@ Bali/AU mockup set: https://claude.ai/code/artifact/59a67d0d-9899-41a6-9707-4365
 
 ## Sequencing
 
-Organic (Buffer + Meta Business Suite) can go live once the 5 keeper assets are exported. Paid on both platforms should wait for the landing page to be hosted and the Privacy Policy to exist.
+Organic (Buffer + Meta Business Suite) can go live once the 5 keeper assets are exported. Paid on both platforms only needs the landing page hosted now — the Privacy Policy blocker is cleared.
