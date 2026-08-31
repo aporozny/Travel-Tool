@@ -8,8 +8,14 @@ import { pool } from '../utils/db';
 import { redis } from '../utils/redis';
 import { registerRateLimit } from '../middleware/rateLimit';
 import { sendEmail } from '../services/notifications';
+import { recordConsent } from '../services/consent';
 
 export const authRouter = Router();
+
+// Bump whenever the published Terms/Privacy draft materially changes --
+// existing acceptances stay valid for their own version; this is an
+// append-only log (consent.ts), never a value that gets overwritten.
+const TERMS_VERSION = 'terms_of_service_v0.2';
 
 const COMMON_PASSWORDS = new Set([
   'password', 'password1', 'password123', '12345678', '123456789',
@@ -20,6 +26,9 @@ const registerSchema = z.object({
   email: z.string().email().toLowerCase(),
   password: z.string().min(8).max(100),
   role: z.enum(['traveler', 'operator']),
+  acceptedTerms: z.literal(true, {
+    errorMap: () => ({ message: 'You must accept the Terms of Service and Privacy Policy to create an account.' }),
+  }),
 }).superRefine((data, ctx) => {
   const lower = data.password.toLowerCase();
   if (COMMON_PASSWORDS.has(lower)) {
@@ -82,6 +91,13 @@ authRouter.post('/register', registerRateLimit, async (req: Request, res: Respon
     }
 
     await client.query('COMMIT');
+
+    // Best-effort, outside the registration transaction -- the user row is
+    // already committed, and consent_records is an append-only audit log
+    // (see consent.ts), not something registration should roll back over.
+    recordConsent(userId, TERMS_VERSION, true).catch((err) =>
+      console.error('Failed to record terms acceptance for', userId, err)
+    );
 
     const { accessToken, refreshToken } = generateTokens(userId, body.email, body.role);
     await redis.setex(`refresh:${userId}`, 60 * 60 * 24 * 7, refreshToken);

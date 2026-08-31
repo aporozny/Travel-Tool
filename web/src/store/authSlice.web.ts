@@ -23,7 +23,7 @@ const initialState: AuthState = {
 export const register = createAsyncThunk(
 	"auth/register",
 	async (
-		payload: { email: string; password: string; role: "traveler" | "operator" },
+		payload: { email: string; password: string; role: "traveler" | "operator"; acceptedTerms: boolean },
 		{ rejectWithValue },
 	) => {
 		try {

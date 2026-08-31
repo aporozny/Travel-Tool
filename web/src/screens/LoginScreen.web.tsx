@@ -14,6 +14,7 @@ export default function LoginScreen() {
   const [name, setName] = useState('');
   const [destination, setDestination] = useState('');
   const [role, setRole] = useState<'traveler' | 'operator'>('traveler');
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [waitlistSuccess, setWaitlistSuccess] = useState(false);
@@ -82,10 +83,11 @@ export default function LoginScreen() {
   const handleRegister = async () => {
     if (!email || !password) { setError('Please enter your email and password'); return; }
     if (password.length < 8) { setError('Password must be at least 8 characters'); return; }
+    if (!acceptedTerms) { setError('Please accept the Terms of Service and Privacy Policy'); return; }
     setLoading(true);
     setError('');
     try {
-      await dispatch(register({ email, password, role })).unwrap();
+      await dispatch(register({ email, password, role, acceptedTerms })).unwrap();
       // Mark invite as used
       if (inviteToken) {
         await api.post('/waitlist/use-invite', { token: inviteToken }).catch(() => {});
@@ -259,6 +261,18 @@ export default function LoginScreen() {
                 onClick={() => setRole('operator')}>Operator</button>
             </div>
           </div>
+
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, margin: '4px 0 16px', fontSize: 13, color: '#6b6559', cursor: 'pointer' }}>
+            <input type="checkbox" checked={acceptedTerms}
+              onChange={e => setAcceptedTerms(e.target.checked)}
+              style={{ marginTop: 2 }} />
+            <span>
+              I agree to Drift's{' '}
+              <a href="/legal/privacy-terms.html#t-accept" target="_blank" rel="noopener noreferrer">Terms of Service</a>
+              {' '}and{' '}
+              <a href="/legal/privacy-terms.html#p-intro" target="_blank" rel="noopener noreferrer">Privacy Policy</a>
+            </span>
+          </label>
 
           <button style={{ ...s.submit, opacity: loading ? 0.7 : 1 }}
             onClick={handleRegister} disabled={loading}>
