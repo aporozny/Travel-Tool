@@ -53,6 +53,7 @@ interface FlightOffer {
   totalAmount: number;
   currency: string;
   expiresAt: string;
+  provider: 'duffel' | 'travelport';
 }
 
 interface PassengerForm {
@@ -506,6 +507,7 @@ export default function FlightsScreen() {
               <div style={s.offerHeader}>
                 {offer.airlineLogoUrl && <img src={offer.airlineLogoUrl} alt={offer.airline} style={s.airlineLogo} />}
                 <span style={s.airlineName}>{offer.airline}</span>
+                <span style={s.providerTag}>via {offer.provider === 'travelport' ? 'Travelport' : 'Duffel'}</span>
                 <span style={s.price}>${offer.totalAmount.toFixed(2)} {offer.currency}</span>
               </div>
 
@@ -527,10 +529,21 @@ export default function FlightsScreen() {
                 </div>
               ))}
 
-              <p style={s.disclosure}>Fare shown includes Drift's booking fee.</p>
-              <button style={s.bookBtn} onClick={() => { setBooking(null); setCheckoutOffer(offer); }}>
-                Book this flight
-              </button>
+              {offer.provider === 'travelport' ? (
+                <>
+                  <p style={s.disclosure}>Shown for comparison -- booking through this provider isn't available yet.</p>
+                  <button style={{ ...s.bookBtn, opacity: 0.5, cursor: 'not-allowed' }} disabled>
+                    Booking coming soon
+                  </button>
+                </>
+              ) : (
+                <>
+                  <p style={s.disclosure}>Fare shown includes Drift's booking fee.</p>
+                  <button style={s.bookBtn} onClick={() => { setBooking(null); setCheckoutOffer(offer); }}>
+                    Book this flight
+                  </button>
+                </>
+              )}
             </div>
           ))}
         </div>
@@ -590,6 +603,7 @@ const s: Record<string, React.CSSProperties> = {
   offerHeader: { display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 },
   airlineLogo: { width: 24, height: 24, objectFit: 'contain' as const },
   airlineName: { fontSize: 14, fontWeight: 600, color: C.text, flex: 1 },
+  providerTag: { fontSize: 11, color: C.muted, background: C.bg, borderRadius: 6, padding: '2px 8px' },
   price: { fontSize: 18, fontWeight: 700, color: C.goldDark },
   sliceRow: { display: 'flex', alignItems: 'center', gap: 16, padding: '10px 0', borderTop: `1px solid ${C.border}` },
   sliceTimes: { display: 'flex', flexDirection: 'column' as const, alignItems: 'center', minWidth: 60 },

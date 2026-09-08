@@ -36,10 +36,15 @@ export interface StaysAccommodationView {
 	reviewCount: number | null;
 	photoUrls: string[];
 	amenityTypes: string[];
-	cheapestRateTotalAmount: string;
-	cheapestRateCurrency: string;
+	// Nullable, not just string: Travelport's sandbox has real properties
+	// that come back with no rate data at all ("Rates unavailable for N
+	// properties" -- confirmed live, not a mapping gap). Duffel always
+	// populates these; Travelport sometimes can't.
+	cheapestRateTotalAmount: string | null;
+	cheapestRateCurrency: string | null;
 	latitude: number | null;
 	longitude: number | null;
+	provider: "duffel" | "travelport";
 }
 
 function toAccommodationView(result: StaysSearchResult): StaysAccommodationView {
@@ -59,6 +64,7 @@ function toAccommodationView(result: StaysSearchResult): StaysAccommodationView 
 		cheapestRateCurrency: result.cheapest_rate_currency,
 		latitude: acc.location.geographic_coordinates?.latitude ?? null,
 		longitude: acc.location.geographic_coordinates?.longitude ?? null,
+		provider: "duffel",
 	};
 }
 

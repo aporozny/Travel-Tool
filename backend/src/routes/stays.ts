@@ -2,7 +2,8 @@ import { Router, Response } from "express";
 import { z } from "zod";
 import { DuffelError } from "@duffel/api";
 import { authenticate, AuthenticatedRequest } from "../middleware/authenticate";
-import { searchStays, fetchStaysRates } from "../services/stays";
+import { searchStays, fetchStaysRates, type StaysAccommodationView } from "../services/stays";
+import { searchTravelportStays } from "../services/travelportStays";
 
 export const staysRouter = Router();
 
@@ -37,13 +38,39 @@ const searchSchema = z.object({
 });
 
 // POST /api/v1/stays/search
-// Search/browse only -- no booking. Ships inactive: throws a clear
-// "not configured" error (surfaced here as 503) until DUFFEL_API_KEY is
-// set, same fail-closed pattern as flights.ts.
+// Search/browse only -- no booking. Duffel Stays is currently blocked
+// (403, "not enabled for your account" -- see RISK-REGISTER R15), so
+// unlike flights.ts, Duffel is treated as tolerant here too, not just
+// Travelport: whichever provider succeeds is returned, and this only
+// fails if BOTH do (in which case the more informative of the two errors
+// -- e.g. a bad destination name -- is what gets surfaced below).
 staysRouter.post("/search", authenticate, async (req: AuthenticatedRequest, res: Response) => {
 	try {
 		const body = searchSchema.parse(req.body);
-		const results = await searchStays(body);
+		const [duffelResult, travelportResult] = await Promise.allSettled([
+			searchStays(body),
+			searchTravelportStays(body),
+		]);
+
+		// Log both outcomes before deciding what to do with them -- logging
+		// only in the "at least one succeeded" branch meant a double failure
+		// threw silently with no record of what Travelport's side actually
+		// said (found live while debugging exactly that).
+		if (duffelResult.status === "rejected") {
+			console.error("Duffel stays search failed:", duffelResult.reason);
+		}
+		if (travelportResult.status === "rejected") {
+			console.error("Travelport stays search failed:", travelportResult.reason);
+		}
+
+		let results: StaysAccommodationView[] = [];
+		if (duffelResult.status === "fulfilled") results = results.concat(duffelResult.value);
+		if (travelportResult.status === "fulfilled") results = results.concat(travelportResult.value);
+
+		if (results.length === 0) {
+			throw duffelResult.status === "rejected" ? duffelResult.reason : (travelportResult as PromiseRejectedResult).reason;
+		}
+
 		return res.json({ results });
 	} catch (err) {
 		if (err instanceof z.ZodError) return res.status(400).json({ message: "Validation error", errors: err.errors });

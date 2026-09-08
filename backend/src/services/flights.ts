@@ -61,12 +61,12 @@ export interface FlightOfferView {
 	totalAmount: number; // includes Drift's markup
 	currency: string;
 	expiresAt: string;
+	provider: "duffel" | "travelport";
 }
 
-// "PT14H30M" -> 870. Duffel returns ISO 8601 durations; nothing in this
-// codebase already parses them, and pulling in a library for one regex
-// felt like overkill.
-function parseIsoDurationMinutes(iso: string | null): number | null {
+// "PT14H30M" -> 870. Duffel and Travelport both return ISO 8601 durations
+// (same standard), so this is shared rather than duplicated per provider.
+export function parseIsoDurationMinutes(iso: string | null): number | null {
 	if (!iso) return null;
 	const match = iso.match(/PT(?:(\d+)H)?(?:(\d+)M)?/);
 	if (!match) return null;
@@ -164,6 +164,7 @@ function toOfferView(offer: Omit<Offer, "available_services">, markedUpTotal: nu
 		totalAmount: markedUpTotal,
 		currency: offer.total_currency,
 		expiresAt: offer.expires_at,
+		provider: "duffel",
 	};
 }
 
