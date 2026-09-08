@@ -13,6 +13,7 @@ import MessagesScreen from './MessagesScreen.web';
 import CommunityScreen from './CommunityScreen.web';
 import TripsScreen from './TripsScreen.web';
 import FlightsScreen from './FlightsScreen.web';
+import StaysScreen from './StaysScreen.web';
 import UnderConstructionScreen from './UnderConstructionScreen.web';
 import useIsMobile from '../hooks/useIsMobile.web';
 
@@ -23,7 +24,7 @@ import useIsMobile from '../hooks/useIsMobile.web';
 // remove it) once DUFFEL_API_KEY is switched to a duffel_live_ key.
 const DUFFEL_IS_TEST_MODE = true;
 
-type Tab = 'explore' | 'community' | 'trips' | 'flights' | 'bookings' | 'safety' | 'profile' | 'dashboard' | 'members' | 'messages';
+type Tab = 'explore' | 'community' | 'trips' | 'flights' | 'stays' | 'bookings' | 'safety' | 'profile' | 'dashboard' | 'members' | 'messages';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const C = {
@@ -83,6 +84,7 @@ export default function AppShell() {
         { key: 'explore',   label: 'Explore',    icon: '◎' },
         { key: 'trips',     label: 'Trips',      icon: '✈' },
         { key: 'flights',   label: 'Flights',    icon: '✈︎' },
+        { key: 'stays',     label: 'Stays',      icon: '⌂' },
         { key: 'members',   label: 'Members',    icon: '◉', badge: pendingConnections },
         { key: 'messages',  label: 'Messages',   icon: '◇', badge: unreadMessages },
         { key: 'bookings',  label: 'Bookings',   icon: '◆' },
@@ -97,6 +99,7 @@ export default function AppShell() {
       case 'flights':   return DUFFEL_IS_TEST_MODE
         ? <UnderConstructionScreen title="Flights" message="Flight booking is almost ready — we're finishing up final testing before it goes live. Check back soon." />
         : <FlightsScreen />;
+      case 'stays':     return <StaysScreen />;
       case 'explore':   return <ExploreScreen onSelectOperator={(op: any) => setDetail({ type: 'operator', data: op })} detail={detail} onClearDetail={() => setDetail(null)} />;
       case 'bookings':  return <BookingsScreen />;
       case 'safety':    return <SafetyScreen />;
