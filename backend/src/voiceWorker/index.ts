@@ -4,7 +4,7 @@ import { LLM as AnthropicLLM } from "@livekit/agents-plugin-anthropic";
 import { TTS as ElevenLabsTTS } from "@livekit/agents-plugin-elevenlabs";
 import { startCall, endCall, getCallerLastLocation } from "../services/voiceAgent";
 import type { CallOutcome } from "../services/voiceAgent";
-import { createSafetyAgent } from "./agent";
+import { createSafetyAgent, OPENING_LINE } from "./agent";
 
 const DEFAULT_ELEVENLABS_VOICE_ID = "EXAVITQu4vr4xnSDxMaL"; // ElevenLabs "Sarah" -- Mature, Reassuring, Confident. Verified against the real account (the old default, Rachel, was from ElevenLabs' deprecated premade-voice library and 404'd on this account).
 
@@ -140,7 +140,19 @@ export default defineAgent({
 
 		try {
 			await session.start({ agent: createSafetyAgent(callId, (o) => (outcome = o), knownLocation), room: ctx.room });
-			await session.generateReply();
+			// The opening line is fixed, mandatory, word-for-word text, so it
+			// must never depend on the LLM's judgment. Play it directly via
+			// TTS instead of asking Claude to reproduce it via
+			// generateReply() -- a real call on 2026-09-15 showed the model
+			// occasionally misreading the Anthropic plugin's synthetic
+			// empty-history placeholder message (inserted because
+			// generateReply() runs before the caller has said anything, and
+			// Claude's API requires the first message to come from a user)
+			// as meaningful signal, and improvising a "didn't receive any
+			// audio" check-in instead of this line. session.say() records
+			// itself into session.history the same as a generated reply
+			// would, so later turns still have it as context.
+			await session.say(OPENING_LINE);
 
 			await new Promise<void>((resolve) => {
 				ctx.room.on("disconnected", () => resolve());
