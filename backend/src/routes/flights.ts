@@ -4,6 +4,7 @@ import { DuffelError } from "@duffel/api";
 import { authenticate, AuthenticatedRequest } from "../middleware/authenticate";
 import { searchFlights, createCheckoutPaymentIntent, confirmCheckoutPaymentIntent, createFlightOrder, listFlightOrders, type FlightOfferView } from "../services/flights";
 import { searchTravelportFlights } from "../services/travelportFlights";
+import { searchTripgicFlights } from "../services/tripgicFlights";
 
 // Duffel's own validation errors (expired fare, an offer that's already
 // been booked from the same search, etc.) have a clear human-readable
@@ -39,17 +40,20 @@ const searchSchema = z.object({
 // (surfaced here as 503) until DUFFEL_API_KEY is set, same fail-closed
 // default as every other credential-gated route in this codebase.
 //
-// Travelport is merged in alongside Duffel (not instead of), via
-// Promise.allSettled: Travelport is currently on a shared trial PCC with
-// no bookable path, so it's treated as tolerant/additive -- if it fails
-// or isn't configured, Duffel's results (and the existing 503 behaviour
-// when Duffel itself isn't configured) are completely unaffected.
+// Travelport and TripGic are merged in alongside Duffel (not instead of),
+// via Promise.allSettled: neither has a bookable path through Drift yet
+// (Travelport is on a shared trial PCC; TripGic's booking flow is proven
+// in their sandbox but not wired into checkout), so both are treated as
+// tolerant/additive -- if either fails or isn't configured, Duffel's
+// results (and the existing 503 behaviour when Duffel itself isn't
+// configured) are completely unaffected.
 flightsRouter.post("/search", authenticate, async (req: AuthenticatedRequest, res: Response) => {
 	try {
 		const body = searchSchema.parse(req.body);
-		const [duffelResult, travelportResult] = await Promise.allSettled([
+		const [duffelResult, travelportResult, tripgicResult] = await Promise.allSettled([
 			searchFlights(body),
 			searchTravelportFlights(body),
+			searchTripgicFlights(body),
 		]);
 
 		if (duffelResult.status === "rejected") throw duffelResult.reason;
@@ -59,6 +63,11 @@ flightsRouter.post("/search", authenticate, async (req: AuthenticatedRequest, re
 			offers = offers.concat(travelportResult.value);
 		} else {
 			console.error("Travelport flight search failed (non-fatal, Duffel results still returned):", travelportResult.reason);
+		}
+		if (tripgicResult.status === "fulfilled") {
+			offers = offers.concat(tripgicResult.value);
+		} else {
+			console.error("TripGic flight search failed (non-fatal, Duffel results still returned):", tripgicResult.reason);
 		}
 		offers.sort((a, b) => a.totalAmount - b.totalAmount);
 

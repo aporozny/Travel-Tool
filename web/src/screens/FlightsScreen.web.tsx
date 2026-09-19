@@ -53,8 +53,14 @@ interface FlightOffer {
   totalAmount: number;
   currency: string;
   expiresAt: string;
-  provider: 'duffel' | 'travelport';
+  provider: 'duffel' | 'travelport' | 'tripgic';
 }
+
+const PROVIDER_LABELS: Record<FlightOffer['provider'], string> = {
+  duffel: 'Duffel',
+  travelport: 'Travelport',
+  tripgic: 'TripGic',
+};
 
 interface PassengerForm {
   id: string;
@@ -507,7 +513,7 @@ export default function FlightsScreen() {
               <div style={s.offerHeader}>
                 {offer.airlineLogoUrl && <img src={offer.airlineLogoUrl} alt={offer.airline} style={s.airlineLogo} />}
                 <span style={s.airlineName}>{offer.airline}</span>
-                <span style={s.providerTag}>via {offer.provider === 'travelport' ? 'Travelport' : 'Duffel'}</span>
+                <span style={s.providerTag}>via {PROVIDER_LABELS[offer.provider]}</span>
                 <span style={s.price}>${offer.totalAmount.toFixed(2)} {offer.currency}</span>
               </div>
 
@@ -529,7 +535,7 @@ export default function FlightsScreen() {
                 </div>
               ))}
 
-              {offer.provider === 'travelport' ? (
+              {offer.provider !== 'duffel' ? (
                 <>
                   <p style={s.disclosure}>Shown for comparison -- booking through this provider isn't available yet.</p>
                   <button style={{ ...s.bookBtn, opacity: 0.5, cursor: 'not-allowed' }} disabled>

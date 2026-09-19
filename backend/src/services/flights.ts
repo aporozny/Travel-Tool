@@ -61,7 +61,7 @@ export interface FlightOfferView {
 	totalAmount: number; // includes Drift's markup
 	currency: string;
 	expiresAt: string;
-	provider: "duffel" | "travelport";
+	provider: "duffel" | "travelport" | "tripgic";
 }
 
 // "PT14H30M" -> 870. Duffel and Travelport both return ISO 8601 durations
