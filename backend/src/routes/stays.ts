@@ -4,6 +4,7 @@ import { DuffelError } from "@duffel/api";
 import { authenticate, AuthenticatedRequest } from "../middleware/authenticate";
 import { searchStays, fetchStaysRates, type StaysAccommodationView } from "../services/stays";
 import { searchTravelportStays } from "../services/travelportStays";
+import { startTripgicStaysSearch, getTripgicStaysState, isValidSearchId } from "../services/tripgicStays";
 
 export const staysRouter = Router();
 
@@ -81,6 +82,43 @@ staysRouter.post("/search", authenticate, async (req: AuthenticatedRequest, res:
 			return res.status(400).json({ message: err.message });
 		}
 		if (respondToDuffelError(err, res)) return;
+		console.error(err);
+		return res.status(500).json({ message: "Internal server error" });
+	}
+});
+
+// POST /api/v1/stays/tripgic-search
+// TripGic hotel search takes ~40s upstream, so it can't ride along in
+// /search above -- that would hold every other provider's results back
+// for the slowest one. This starts (or joins) a background job and
+// returns straight away; the client polls the GET below. A search that
+// was already run in the last 30 minutes comes back ready immediately.
+staysRouter.post("/tripgic-search", authenticate, async (req: AuthenticatedRequest, res: Response) => {
+	try {
+		const body = searchSchema.parse(req.body);
+		const { searchId } = await startTripgicStaysSearch(body);
+		const state = await getTripgicStaysState(searchId);
+		return res.json({ searchId, ...state });
+	} catch (err) {
+		if (err instanceof z.ZodError) return res.status(400).json({ message: "Validation error", errors: err.errors });
+		if (err instanceof Error && err.message.includes("not configured")) {
+			return res.status(503).json({ message: "Extended hotel search is not yet available" });
+		}
+		console.error(err);
+		return res.status(500).json({ message: "Internal server error" });
+	}
+});
+
+// GET /api/v1/stays/tripgic-search/:searchId
+// Poll target for the job above: pending | ready | failed | unknown
+// ("unknown" = never started, or expired -- the client just searches again).
+// Registered before /:searchResultId/rates so "tripgic-search" is never
+// read as a search result id.
+staysRouter.get("/tripgic-search/:searchId", authenticate, async (req: AuthenticatedRequest, res: Response) => {
+	try {
+		if (!isValidSearchId(req.params.searchId)) return res.status(400).json({ message: "Invalid search id" });
+		return res.json(await getTripgicStaysState(req.params.searchId));
+	} catch (err) {
 		console.error(err);
 		return res.status(500).json({ message: "Internal server error" });
 	}

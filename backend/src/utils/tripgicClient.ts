@@ -9,11 +9,14 @@
 // securitySchemes declare, not a typo here). Confirmed live against their
 // sandbox, 2026-09-18.
 //
-// Every request is bounded by a timeout: TripGic search is called inside a
-// Promise.allSettled alongside Duffel and Travelport, so an upstream that
-// hangs would otherwise hold the whole flight search response open.
+// Every request is bounded by a timeout: TripGic flight search is called
+// inside a Promise.allSettled alongside Duffel and Travelport, so an
+// upstream that hangs would otherwise hold the whole response open. The
+// default suits flight search (~3s); hotel search legitimately takes ~40s
+// (their own sample response says 42s, confirmed live) and passes a longer
+// timeoutMs -- it runs as a background job, never inline in a request.
 
-const REQUEST_TIMEOUT_MS = 20000;
+const DEFAULT_TIMEOUT_MS = 20000;
 
 function requireEnv(name: string): string {
 	const value = process.env[name];
@@ -23,7 +26,7 @@ function requireEnv(name: string): string {
 	return value;
 }
 
-export async function tripgicPost<T>(path: string, body: unknown): Promise<T> {
+export async function tripgicPost<T>(path: string, body: unknown, options: { timeoutMs?: number } = {}): Promise<T> {
 	const base = requireEnv("TRIPGIC_API_ENDPOINT").replace(/\/+$/, "");
 	const apiKey = requireEnv("TRIPGIC_API_KEY");
 	const secretCode = requireEnv("TRIPGIC_SECRET_CODE");
@@ -36,7 +39,7 @@ export async function tripgicPost<T>(path: string, body: unknown): Promise<T> {
 			secretecode: secretCode,
 		},
 		body: JSON.stringify(body),
-		signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+		signal: AbortSignal.timeout(options.timeoutMs ?? DEFAULT_TIMEOUT_MS),
 	});
 
 	let data: unknown;

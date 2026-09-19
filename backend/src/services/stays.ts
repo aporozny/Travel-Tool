@@ -44,7 +44,7 @@ export interface StaysAccommodationView {
 	cheapestRateCurrency: string | null;
 	latitude: number | null;
 	longitude: number | null;
-	provider: "duffel" | "travelport";
+	provider: "duffel" | "travelport" | "tripgic";
 }
 
 function toAccommodationView(result: StaysSearchResult): StaysAccommodationView {

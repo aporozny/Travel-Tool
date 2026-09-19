@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import api from '../services/api.web';
 
 // Matches FlightsScreen.web.tsx / AppShell.web.tsx design tokens exactly.
@@ -29,8 +29,21 @@ interface StaysAccommodation {
   cheapestRateCurrency: string | null;
   latitude: number | null;
   longitude: number | null;
-  provider: 'duffel' | 'travelport';
+  provider: 'duffel' | 'travelport' | 'tripgic';
 }
+
+const PROVIDER_LABELS: Record<StaysAccommodation['provider'], string> = {
+  duffel: 'Duffel',
+  travelport: 'Travelport',
+  tripgic: 'TripGic',
+};
+
+// TripGic hotel search takes ~40s upstream, so the backend runs it as a
+// background job (POST /stays/tripgic-search, then poll the GET). These
+// results are appended below the fast providers' once they land.
+const EXTRA_POLL_INTERVAL_MS = 3000;
+const EXTRA_POLL_MAX_MS = 150000;
+type ExtraStatus = 'idle' | 'searching' | 'done' | 'failed';
 
 // Browse only -- there's no booking path for either provider yet (Duffel
 // Stays is blocked on account access, Travelport's payment model hasn't
@@ -47,6 +60,13 @@ export default function StaysScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [searched, setSearched] = useState(false);
+  const [extraResults, setExtraResults] = useState<StaysAccommodation[]>([]);
+  const [extraStatus, setExtraStatus] = useState<ExtraStatus>('idle');
+
+  // Bumped on every new search (and on unmount) so a poll loop belonging to
+  // an earlier search stops instead of overwriting the newer one's results.
+  const searchToken = useRef(0);
+  useEffect(() => () => { searchToken.current += 1; }, []);
 
   const todayIso = new Date().toISOString().slice(0, 10);
 
@@ -55,29 +75,58 @@ export default function StaysScreen() {
     if (checkOutDate && value && checkOutDate <= value) setCheckOutDate('');
   };
 
+  const runExtendedSearch = async (token: number, payload: Record<string, unknown>) => {
+    const isStale = () => token !== searchToken.current;
+    try {
+      let res = await api.post('/stays/tripgic-search', payload, { timeout: 30000 });
+      const deadline = Date.now() + EXTRA_POLL_MAX_MS;
+      while (res.data.status === 'pending' || res.data.status === 'unknown') {
+        if (Date.now() > deadline) throw new Error('timed out');
+        await new Promise((resolve) => setTimeout(resolve, EXTRA_POLL_INTERVAL_MS));
+        if (isStale()) return;
+        res = await api.get(`/stays/tripgic-search/${res.data.searchId}`, { timeout: 30000 });
+      }
+      if (isStale()) return;
+      if (res.data.status === 'ready') {
+        setExtraResults(res.data.results || []);
+        setExtraStatus('done');
+      } else {
+        setExtraStatus('failed');
+      }
+    } catch {
+      // Extended search is best-effort -- the fast providers' results stand on their own.
+      if (!isStale()) setExtraStatus('failed');
+    }
+  };
+
   const handleSearch = async () => {
     if (!destination.trim()) { setError('Enter a destination.'); return; }
     if (!checkInDate || !checkOutDate) { setError('Pick check-in and check-out dates.'); return; }
 
+    const token = ++searchToken.current;
+    const payload = { destination: destination.trim(), checkInDate, checkOutDate, rooms, adults };
+
     setLoading(true);
     setError('');
     setSearched(true);
+    setExtraResults([]);
+    setExtraStatus('searching');
+    void runExtendedSearch(token, payload);
     try {
-      const res = await api.post('/stays/search', {
-        destination: destination.trim(),
-        checkInDate,
-        checkOutDate,
-        rooms,
-        adults,
-      }, { timeout: 30000 });
+      const res = await api.post('/stays/search', payload, { timeout: 30000 });
+      if (token !== searchToken.current) return;
       setResults(res.data.results || []);
     } catch (err: any) {
+      if (token !== searchToken.current) return;
       setError(err?.response?.data?.message || 'Could not search stays.');
       setResults(null);
     } finally {
-      setLoading(false);
+      if (token === searchToken.current) setLoading(false);
     }
   };
+
+  const allResults = [...(results ?? []), ...extraResults];
+  const searchingMore = extraStatus === 'searching';
 
   return (
     <div style={s.page}>
@@ -114,19 +163,36 @@ export default function StaysScreen() {
         </button>
       </div>
 
-      {error && <div style={s.error}>{error}</div>}
+      {/* The fast providers' error only matters when nothing else turned up. */}
+      {error && allResults.length === 0 && !searchingMore && <div style={s.error}>{error}</div>}
 
-      {searched && !loading && results && results.length === 0 && !error && (
+      {searchingMore && (
+        <div style={s.banner}>
+          {allResults.length > 0
+            ? 'Searching more hotels -- more results will appear below in about a minute.'
+            : 'Searching hotels -- this can take up to a minute.'}
+        </div>
+      )}
+      {extraStatus === 'failed' && (
+        <p style={s.mutedSmall}>Some additional hotel results couldn't be loaded.</p>
+      )}
+
+      {searched && !loading && !searchingMore && allResults.length === 0 && !error && (
         <p style={s.muted}>No places found for that search.</p>
       )}
 
-      {results && results.length > 0 && (
+      {allResults.length > 0 && (
         <div style={s.results}>
-          {results.map((r) => (
-            <div key={r.id} style={s.stayCard}>
+          {allResults.map((r) => (
+            <div key={`${r.provider}:${r.id}`} style={s.stayCard}>
+              {r.photoUrls[0] && (
+                <img src={r.photoUrls[0]} alt="" loading="lazy" style={s.photo}
+                  onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
+              )}
+              <div style={s.stayBody}>
               <div style={s.stayHeader}>
                 <span style={s.stayName}>{r.name}</span>
-                <span style={s.providerTag}>via {r.provider === 'travelport' ? 'Travelport' : 'Duffel'}</span>
+                <span style={s.providerTag}>via {PROVIDER_LABELS[r.provider]}</span>
                 <span style={s.price}>
                   {r.cheapestRateTotalAmount ? `$${r.cheapestRateTotalAmount} ${r.cheapestRateCurrency}` : 'Price unavailable'}
                 </span>
@@ -143,6 +209,7 @@ export default function StaysScreen() {
                   {r.amenityTypes.length > 6 && <span style={s.mutedSmall}>+{r.amenityTypes.length - 6} more</span>}
                 </div>
               )}
+              </div>
             </div>
           ))}
         </div>
@@ -167,7 +234,10 @@ const s: Record<string, React.CSSProperties> = {
   muted: { color: C.muted, fontSize: 14 },
   mutedSmall: { color: C.muted, fontSize: 11 },
   results: { display: 'flex', flexDirection: 'column' as const, gap: 14 },
-  stayCard: { background: C.white, border: `1px solid ${C.border}`, borderRadius: 14, padding: 18 },
+  banner: { background: C.goldLight, color: C.goldDark, padding: '10px 14px', borderRadius: 8, marginBottom: 16, fontSize: 13 },
+  stayCard: { background: C.white, border: `1px solid ${C.border}`, borderRadius: 14, padding: 18, display: 'flex', gap: 16, alignItems: 'flex-start' },
+  photo: { width: 96, height: 72, objectFit: 'cover' as const, borderRadius: 8, flexShrink: 0, background: C.soft },
+  stayBody: { flex: 1, minWidth: 0 },
   stayHeader: { display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 },
   stayName: { fontSize: 15, fontWeight: 600, color: C.text, flex: 1 },
   providerTag: { fontSize: 11, color: C.muted, background: C.bg, borderRadius: 6, padding: '2px 8px' },
