@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import api from '../services/api.web';
 import { Booking } from '@/types';
+import { TravelBookings } from './TravelBookings.web';
 
 const STATUS_STYLES: Record<string, React.CSSProperties> = {
   pending:   { background: '#FFF8E1', color: '#F57F17' },
@@ -12,6 +13,8 @@ const STATUS_STYLES: Record<string, React.CSSProperties> = {
 export default function BookingsScreen() {
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(true);
+  // Flights and hotels booked through Drift load themselves; null until they have.
+  const [travelCount, setTravelCount] = useState<number | null>(null);
 
   useEffect(() => {
     api.get('/bookings')
@@ -25,16 +28,18 @@ export default function BookingsScreen() {
   return (
     <div style={styles.container}>
       <h2 style={styles.title}>Bookings</h2>
+      <TravelBookings onLoaded={setTravelCount} />
       {loading ? (
         <p style={styles.empty}>Loading...</p>
       ) : bookings.length === 0 ? (
-        <div style={styles.emptyBox}>
+        travelCount === 0 && <div style={styles.emptyBox}>
           <p style={{ fontSize: 40, marginBottom: 12 }}>📋</p>
           <p style={{ fontSize: 16, fontWeight: 600, color: '#1a1a1a' }}>No bookings yet</p>
           <p style={{ fontSize: 14, color: '#999', marginTop: 6 }}>Browse operators and make your first booking.</p>
         </div>
       ) : (
         <div style={styles.list}>
+          {!!travelCount && <h3 style={{ fontSize: 20, fontWeight: 700, color: '#1a1a1a', margin: '0 0 4px' }}>Local experiences</h3>}
           {bookings.map(b => (
             <div key={b.id} style={styles.card}>
               <div style={styles.cardTop}>
