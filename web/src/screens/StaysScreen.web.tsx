@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import api from '../services/api.web';
+import { useTripgicBookingEnabled, TripgicHotelCheckout, TripgicOrders, type HotelSearchContext } from './TripgicCheckout.web';
 
 // Matches FlightsScreen.web.tsx / AppShell.web.tsx design tokens exactly.
 const C = {
@@ -63,6 +64,12 @@ export default function StaysScreen() {
   const [extraResults, setExtraResults] = useState<StaysAccommodation[]>([]);
   const [extraStatus, setExtraStatus] = useState<ExtraStatus>('idle');
 
+  // Booking: only TripGic results are bookable, and only when the backend says so.
+  const tripgicBookingEnabled = useTripgicBookingEnabled();
+  const [lastSearch, setLastSearch] = useState<HotelSearchContext | null>(null);
+  const [bookingHotel, setBookingHotel] = useState<StaysAccommodation | null>(null);
+  const [ordersKey, setOrdersKey] = useState(0);
+
   // Bumped on every new search (and on unmount) so a poll loop belonging to
   // an earlier search stops instead of overwriting the newer one's results.
   const searchToken = useRef(0);
@@ -105,6 +112,7 @@ export default function StaysScreen() {
 
     const token = ++searchToken.current;
     const payload = { destination: destination.trim(), checkInDate, checkOutDate, rooms, adults };
+    setLastSearch({ checkInDate, checkOutDate, rooms, adults });
 
     setLoading(true);
     setError('');
@@ -201,6 +209,9 @@ export default function StaysScreen() {
                 {r.cityName}{r.cityName && r.countryCode ? ', ' : ''}{r.countryCode}
                 {r.rating != null && <> · {r.rating}★</>}
               </p>
+              {r.provider === 'tripgic' && tripgicBookingEnabled && lastSearch && (
+                <button style={s.bookBtn} onClick={() => setBookingHotel(r)}>View rooms and book</button>
+              )}
               {r.amenityTypes.length > 0 && (
                 <div style={s.amenityRow}>
                   {r.amenityTypes.slice(0, 6).map((a, i) => (
@@ -214,6 +225,18 @@ export default function StaysScreen() {
           ))}
         </div>
       )}
+
+      {bookingHotel && lastSearch && (
+        <TripgicHotelCheckout
+          hotelId={bookingHotel.accommodationId}
+          hotelName={bookingHotel.name}
+          search={lastSearch}
+          onClose={() => setBookingHotel(null)}
+          onBooked={() => setOrdersKey((k) => k + 1)}
+        />
+      )}
+
+      <TripgicOrders product="hotel" refreshKey={ordersKey} />
     </div>
   );
 }
@@ -244,5 +267,6 @@ const s: Record<string, React.CSSProperties> = {
   price: { fontSize: 16, fontWeight: 700, color: C.goldDark },
   staySub: { fontSize: 13, color: C.muted, margin: '0 0 10px' },
   amenityRow: { display: 'flex', flexWrap: 'wrap' as const, gap: 6, alignItems: 'center' },
+  bookBtn: { padding: '8px 18px', background: C.gold, color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer', margin: '0 0 10px' },
   amenityTag: { fontSize: 11, color: C.text, background: C.soft, borderRadius: 6, padding: '3px 9px' },
 };

@@ -1,4 +1,4 @@
-import { Router, Response } from "express";
+import { Router, Response, NextFunction } from "express";
 import { z } from "zod";
 import rateLimit from "express-rate-limit";
 import { authenticate, AuthenticatedRequest } from "../middleware/authenticate";
@@ -27,6 +27,29 @@ const bookingRateLimit = rateLimit({
 	standardHeaders: true,
 	legacyHeaders: false,
 	message: { message: "Too many booking attempts. Try again in a few minutes." },
+});
+
+// While TripGic bookings are sandbox-only (no customer payment exists yet)
+// they are open to admin accounts only -- the Stays tab is live to every
+// signed-in user, and a regular traveller must not be able to place a
+// booking that charges nobody. The role comes from the database (see
+// authenticate), never from the token.
+function bookingAllowedFor(role: string | undefined): boolean {
+	return process.env.TRIPGIC_PAYMENT_MODE === "sandbox" && role === "admin";
+}
+
+function requireBookingAccess(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+	if (!bookingAllowedFor(req.user?.role)) {
+		return res.status(503).json({ message: "Booking with this provider is not available yet", code: "payments_not_configured" });
+	}
+	next();
+}
+
+// GET /api/v1/tripgic/status -- lets the UI decide whether to show Book
+// buttons at all, instead of showing one that can only fail.
+tripgicRouter.get("/status", authenticate, (req: AuthenticatedRequest, res: Response) => {
+	const enabled = bookingAllowedFor(req.user?.role);
+	return res.json({ bookingEnabled: enabled, sandbox: enabled });
 });
 
 function respondToError(err: unknown, res: Response) {
@@ -59,7 +82,7 @@ const name = z.string().trim().min(1).max(60);
 // Validates the fare with TripGic, re-prices it (markup included) and
 // parks the result server-side. The quoteId it returns is what the order
 // step is keyed on -- the client never sends a price.
-tripgicRouter.post("/flights/quote", authenticate, bookingRateLimit, async (req: AuthenticatedRequest, res: Response) => {
+tripgicRouter.post("/flights/quote", authenticate, requireBookingAccess, bookingRateLimit, async (req: AuthenticatedRequest, res: Response) => {
 	try {
 		const { offerId } = z.object({ offerId: z.string().min(3).max(200) }).parse(req.body);
 		return res.json(await quoteTripgicFlight(req.user!.id, offerId));
@@ -90,7 +113,7 @@ const flightOrderSchema = z.object({
 });
 
 // POST /api/v1/tripgic/flights/orders
-tripgicRouter.post("/flights/orders", authenticate, bookingRateLimit, async (req: AuthenticatedRequest, res: Response) => {
+tripgicRouter.post("/flights/orders", authenticate, requireBookingAccess, bookingRateLimit, async (req: AuthenticatedRequest, res: Response) => {
 	try {
 		const body = flightOrderSchema.parse(req.body);
 		const order = await createTripgicFlightOrder({ userId: req.user!.id, ...body });
@@ -111,7 +134,7 @@ const roomsSchema = z.object({
 });
 
 // POST /api/v1/tripgic/hotels/rooms  (~5s upstream, so inline is fine here)
-tripgicRouter.post("/hotels/rooms", authenticate, async (req: AuthenticatedRequest, res: Response) => {
+tripgicRouter.post("/hotels/rooms", authenticate, requireBookingAccess, async (req: AuthenticatedRequest, res: Response) => {
 	try {
 		return res.json(await listTripgicHotelRooms(roomsSchema.parse(req.body)));
 	} catch (err) {
@@ -120,7 +143,7 @@ tripgicRouter.post("/hotels/rooms", authenticate, async (req: AuthenticatedReque
 });
 
 // POST /api/v1/tripgic/hotels/quote  { trackingId, roomTrackingId }
-tripgicRouter.post("/hotels/quote", authenticate, bookingRateLimit, async (req: AuthenticatedRequest, res: Response) => {
+tripgicRouter.post("/hotels/quote", authenticate, requireBookingAccess, bookingRateLimit, async (req: AuthenticatedRequest, res: Response) => {
 	try {
 		const body = z
 			.object({ trackingId: z.string().regex(/^[A-Za-z0-9]{8,64}$/), roomTrackingId: z.string().regex(/^[A-Za-z0-9#_.-]{8,120}$/) })
@@ -140,7 +163,7 @@ const hotelOrderSchema = z.object({
 });
 
 // POST /api/v1/tripgic/hotels/orders
-tripgicRouter.post("/hotels/orders", authenticate, bookingRateLimit, async (req: AuthenticatedRequest, res: Response) => {
+tripgicRouter.post("/hotels/orders", authenticate, requireBookingAccess, bookingRateLimit, async (req: AuthenticatedRequest, res: Response) => {
 	try {
 		const body = hotelOrderSchema.parse(req.body);
 		const order = await createTripgicHotelOrder({ userId: req.user!.id, ...body });
@@ -168,7 +191,7 @@ tripgicRouter.get("/orders/:id", authenticate, async (req: AuthenticatedRequest,
 	}
 });
 
-tripgicRouter.post("/orders/:id/cancel", authenticate, bookingRateLimit, async (req: AuthenticatedRequest, res: Response) => {
+tripgicRouter.post("/orders/:id/cancel", authenticate, requireBookingAccess, bookingRateLimit, async (req: AuthenticatedRequest, res: Response) => {
 	try {
 		return res.json(await cancelTripgicOrder(req.user!.id, req.params.id));
 	} catch (err) {

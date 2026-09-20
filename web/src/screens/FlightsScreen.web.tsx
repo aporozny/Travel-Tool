@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import api from '../services/api.web';
+import { useTripgicBookingEnabled, TripgicFlightCheckout, TripgicOrders } from './TripgicCheckout.web';
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements, CardNumberElement, CardExpiryElement, CardCvcElement, useStripe, useElements } from '@stripe/react-stripe-js';
 
@@ -366,6 +367,10 @@ export default function FlightsScreen() {
   const [checkoutOffer, setCheckoutOffer] = useState<FlightOffer | null>(null);
   const [booking, setBooking] = useState<{ bookingReference: string } | null>(null);
   const [myOrders, setMyOrders] = useState<FlightOrderSummary[]>([]);
+  // TripGic offers are bookable only when the backend says so (sandbox, admin accounts) -- see TripgicCheckout.web.tsx.
+  const tripgicBookingEnabled = useTripgicBookingEnabled();
+  const [tripgicOfferId, setTripgicOfferId] = useState<string | null>(null);
+  const [tripgicOrdersKey, setTripgicOrdersKey] = useState(0);
 
   const loadMyOrders = () => {
     api.get('/flights/orders').then((res) => setMyOrders(res.data.orders || [])).catch(() => {});
@@ -535,7 +540,14 @@ export default function FlightsScreen() {
                 </div>
               ))}
 
-              {offer.provider !== 'duffel' ? (
+              {offer.provider === 'tripgic' && tripgicBookingEnabled ? (
+                <>
+                  <p style={s.disclosure}>Fare shown includes Drift's booking fee. Test booking -- nobody is charged.</p>
+                  <button style={s.bookBtn} onClick={() => setTripgicOfferId(offer.id)}>
+                    Book this flight
+                  </button>
+                </>
+              ) : offer.provider !== 'duffel' ? (
                 <>
                   <p style={s.disclosure}>Shown for comparison -- booking through this provider isn't available yet.</p>
                   <button style={{ ...s.bookBtn, opacity: 0.5, cursor: 'not-allowed' }} disabled>
@@ -554,6 +566,16 @@ export default function FlightsScreen() {
           ))}
         </div>
       )}
+
+      {tripgicOfferId && (
+        <TripgicFlightCheckout
+          offerId={tripgicOfferId}
+          onClose={() => setTripgicOfferId(null)}
+          onBooked={() => setTripgicOrdersKey((k) => k + 1)}
+        />
+      )}
+
+      <TripgicOrders product="flight" refreshKey={tripgicOrdersKey} />
 
       {checkoutOffer && (
         <CheckoutModal
