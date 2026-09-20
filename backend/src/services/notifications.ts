@@ -36,7 +36,10 @@ export async function sendEmail(to: string, subject: string, text: string): Prom
     return false;
   }
   try {
-    const sgMail = require('@sendgrid/mail');
+    // Loaded on demand so the SendGrid client is only pulled in when an email is
+    // actually sent. Dynamic import instead of require() (lint forbids require);
+    // the default export is the shared mail service instance.
+    const sgMail = (await import('@sendgrid/mail')).default;
     sgMail.setApiKey(process.env.SENDGRID_API_KEY);
     await sgMail.send({
       to,

@@ -11,12 +11,12 @@ const tvEmail = `tv_${Date.now()}@example.com`;
 beforeAll(async () => {
   const opRes = await request(app)
     .post('/api/v1/auth/register')
-    .send({ email: opEmail, password: 'TestPass2026!', role: 'operator' });
+    .send({ email: opEmail, password: 'TestPass2026!', role: 'operator', acceptedTerms: true });
   operatorToken = opRes.body.accessToken;
 
   const tvRes = await request(app)
     .post('/api/v1/auth/register')
-    .send({ email: tvEmail, password: 'TestPass2026!', role: 'traveler' });
+    .send({ email: tvEmail, password: 'TestPass2026!', role: 'traveler', acceptedTerms: true });
   travelerToken = tvRes.body.accessToken;
 });
 

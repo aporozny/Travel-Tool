@@ -17,7 +17,7 @@ describe('POST /api/v1/auth/register', () => {
   it('registers a new traveler', async () => {
     const res = await request(app)
       .post('/api/v1/auth/register')
-      .send({ email: testEmail, password: testPassword, role: 'traveler' });
+      .send({ email: testEmail, password: testPassword, role: 'traveler', acceptedTerms: true });
 
     expect(res.status).toBe(201);
     expect(res.body.user.email).toBe(testEmail);
@@ -29,7 +29,7 @@ describe('POST /api/v1/auth/register', () => {
   it('rejects duplicate email', async () => {
     const res = await request(app)
       .post('/api/v1/auth/register')
-      .send({ email: testEmail, password: testPassword, role: 'traveler' });
+      .send({ email: testEmail, password: testPassword, role: 'traveler', acceptedTerms: true });
 
     expect(res.status).toBe(409);
     expect(res.body.message).toBe('Email already registered');
@@ -38,7 +38,7 @@ describe('POST /api/v1/auth/register', () => {
   it('rejects invalid email', async () => {
     const res = await request(app)
       .post('/api/v1/auth/register')
-      .send({ email: 'not-an-email', password: testPassword, role: 'traveler' });
+      .send({ email: 'not-an-email', password: testPassword, role: 'traveler', acceptedTerms: true });
 
     expect(res.status).toBe(400);
   });
@@ -46,7 +46,7 @@ describe('POST /api/v1/auth/register', () => {
   it('rejects short password', async () => {
     const res = await request(app)
       .post('/api/v1/auth/register')
-      .send({ email: 'new@example.com', password: 'short', role: 'traveler' });
+      .send({ email: 'new@example.com', password: 'short', role: 'traveler', acceptedTerms: true });
 
     expect(res.status).toBe(400);
   });
@@ -54,7 +54,7 @@ describe('POST /api/v1/auth/register', () => {
   it('rejects invalid role', async () => {
     const res = await request(app)
       .post('/api/v1/auth/register')
-      .send({ email: 'new2@example.com', password: testPassword, role: 'admin' });
+      .send({ email: 'new2@example.com', password: testPassword, role: 'admin', acceptedTerms: true });
 
     expect(res.status).toBe(400);
   });

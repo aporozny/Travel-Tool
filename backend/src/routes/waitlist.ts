@@ -1,4 +1,4 @@
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import { pool } from '../utils/db';
 import { authenticate, AuthenticatedRequest } from '../middleware/authenticate';
 import { z } from 'zod';
@@ -132,7 +132,7 @@ waitlistRouter.get('/invite/:token', async (req: Request, res: Response) => {
 // ─── ADMIN ROUTES ─────────────────────────────────────────────────────────────
 
 // Simple admin auth middleware — checks for admin role on user
-async function adminAuth(req: AuthenticatedRequest, res: Response, next: Function) {
+async function adminAuth(req: AuthenticatedRequest, res: Response, next: NextFunction) {
   if (!req.user) {
     return res.status(401).json({ message: 'Authentication required' });
   }
