@@ -64,3 +64,4 @@ jobs:
           JWT_SECRET: test-secret
           JWT_REFRESH_SECRET: test-refresh-secret
           ENCRYPTION_KEY: 0000000000000000000000000000000000000000000000000000000000000000
+          UPLOAD_DIR: /tmp/drift-test-uploads
