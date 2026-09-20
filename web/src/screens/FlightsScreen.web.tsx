@@ -43,6 +43,13 @@ interface FlightOfferPassenger {
   age: number | null;
 }
 
+// Duffel is still on a duffel_test_ key: a "confirmed" booking issues no real
+// ticket. Its offers are shown to everyone, but only bookable by the accounts
+// the backend allows (admin -- see requireAdminWhileDuffelTest in
+// routes/flights.ts, which enforces it; this just avoids offering a button
+// that can only fail). Flip to false once DUFFEL_API_KEY is a live key.
+const DUFFEL_IS_TEST_MODE = true;
+
 interface FlightOffer {
   id: string;
   airline: string;
@@ -547,7 +554,7 @@ export default function FlightsScreen() {
                     Book this flight
                   </button>
                 </>
-              ) : offer.provider !== 'duffel' ? (
+              ) : offer.provider !== 'duffel' || (DUFFEL_IS_TEST_MODE && !tripgicBookingEnabled) ? (
                 <>
                   <p style={s.disclosure}>Shown for comparison -- booking through this provider isn't available yet.</p>
                   <button style={{ ...s.bookBtn, opacity: 0.5, cursor: 'not-allowed' }} disabled>

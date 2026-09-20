@@ -7,6 +7,13 @@ import { Duffel } from "@duffel/api";
 // agent).
 let client: Duffel | null = null;
 
+// A duffel_test_ key books against Duffel's sandbox: an order "succeeds" but
+// no real ticket is issued. Anything that lets a traveller place such an
+// order must be restricted while this is true (see routes/flights.ts).
+export function isDuffelTestMode(): boolean {
+	return (process.env.DUFFEL_API_KEY ?? "").startsWith("duffel_test_");
+}
+
 export function getDuffelClient(): Duffel {
 	if (!process.env.DUFFEL_API_KEY) {
 		throw new Error("DUFFEL_API_KEY not configured -- Duffel booking features are inactive");

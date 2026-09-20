@@ -48,6 +48,18 @@ const check = (name, ok, extra = "") => { (ok ? pass++ : fail++); console.log(`$
   const gl = await call("GET", "/tripgic/orders", null, asTraveler);
   check("regular traveller can still list own (empty) orders", gl.s === 200 && Array.isArray(gl.d.orders));
 
+  // Duffel is on a test key: booking must be closed to regular travellers at the API, not just hidden in the UI.
+  const dq = await call("POST", "/flights/payment-intents", { offerId: "off_does_not_exist" }, asTraveler);
+  check("Duffel test mode: regular traveller cannot start checkout (503)", dq.s === 503 && /not yet available/i.test(dq.d.message || ""), `${dq.s} ${JSON.stringify(dq.d).slice(0, 100)}`);
+  const dc = await call("POST", "/flights/payment-intents/confirm", { paymentIntentId: "pit_x" }, asTraveler);
+  check("Duffel test mode: regular traveller cannot confirm payment (503)", dc.s === 503);
+  const dorder = await call("POST", "/flights/orders", { offerId: "off_x", paymentIntentId: "pit_x", passengers: [{ id: "p", title: "mr", gender: "m", givenName: "A", familyName: "B", bornOn: "1990-01-01", email: "a@b.co", phoneNumber: "+61400000000" }] }, asTraveler);
+  check("Duffel test mode: regular traveller cannot place an order (503)", dorder.s === 503);
+  const dadmin = await call("POST", "/flights/payment-intents", { offerId: "off_does_not_exist" });
+  check("Duffel test mode: admin is NOT blocked by the gate (fails later, on the fake offer)", !(dadmin.s === 503 && /not yet available/i.test(dadmin.d.message || "")), `${dadmin.s} ${JSON.stringify(dadmin.d).slice(0, 100)}`);
+  const dsearch = await call("POST", "/flights/search", { origin: "SYD", destination: "DPS", departureDate: "2026-11-15", adults: 1 }, asTraveler);
+  check("regular traveller can still search flights", dsearch.s === 200 && dsearch.d.offers?.length > 0);
+
   // ---------- FLIGHTS ----------
   console.log("\n### FLIGHTS");
   const search = await call("POST", "/flights/search", { origin: "SYD", destination: "DPS", departureDate: "2026-11-15", adults: 1 });

@@ -1,10 +1,11 @@
-import { Router, Request, Response } from "express";
+import { Router, Request, Response, NextFunction } from "express";
 import { z } from "zod";
 import { DuffelError } from "@duffel/api";
 import { authenticate, AuthenticatedRequest } from "../middleware/authenticate";
 import { searchFlights, createCheckoutPaymentIntent, confirmCheckoutPaymentIntent, createFlightOrder, listFlightOrders, type FlightOfferView } from "../services/flights";
 import { searchTravelportFlights } from "../services/travelportFlights";
 import { searchTripgicFlights } from "../services/tripgicFlights";
+import { isDuffelTestMode } from "../utils/duffelClient";
 
 // Duffel's own validation errors (expired fare, an offer that's already
 // been booked from the same search, etc.) have a clear human-readable
@@ -25,6 +26,18 @@ function respondToDuffelError(err: unknown, res: Response): boolean {
 }
 
 export const flightsRouter = Router();
+
+// While DUFFEL_API_KEY is a duffel_test_ key, a "confirmed" booking issues no
+// real ticket. The Flights tab is visible to everyone, but placing a Duffel
+// booking is admin-only until the key is live -- enforced here, not just by
+// hiding the button, because the routes are callable directly. The role is
+// read from the database by authenticate(), never from the token.
+function requireAdminWhileDuffelTest(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+	if (isDuffelTestMode() && req.user?.role !== "admin") {
+		return res.status(503).json({ message: "Flight booking is not yet available" });
+	}
+	next();
+}
 
 const searchSchema = z.object({
 	origin: z.string().length(3).toUpperCase(),
@@ -91,7 +104,7 @@ const paymentIntentSchema = z.object({
 // First step of checkout: creates a Duffel Payment Intent for the
 // marked-up total. Returns the client_token the frontend needs to render
 // DuffelCardForm -- no card data ever reaches this server.
-flightsRouter.post("/payment-intents", authenticate, async (req: AuthenticatedRequest, res: Response) => {
+flightsRouter.post("/payment-intents", authenticate, requireAdminWhileDuffelTest, async (req: AuthenticatedRequest, res: Response) => {
 	try {
 		const { offerId } = paymentIntentSchema.parse(req.body);
 		const intent = await createCheckoutPaymentIntent(offerId);
@@ -118,7 +131,7 @@ const confirmPaymentIntentSchema = z.object({
 // Second step: called once the traveler has submitted their card via
 // DuffelCardForm client-side. Confirms the charge and credits Drift's
 // Balance.
-flightsRouter.post("/payment-intents/confirm", authenticate, async (req: AuthenticatedRequest, res: Response) => {
+flightsRouter.post("/payment-intents/confirm", authenticate, requireAdminWhileDuffelTest, async (req: AuthenticatedRequest, res: Response) => {
 	try {
 		const { paymentIntentId } = confirmPaymentIntentSchema.parse(req.body);
 		const result = await confirmCheckoutPaymentIntent(paymentIntentId);
@@ -154,7 +167,7 @@ const createOrderSchema = z.object({
 // POST /api/v1/flights/orders
 // Final step: places the actual booking with the supplier, paid from
 // Drift's Balance (funded by the confirmed Payment Intent above).
-flightsRouter.post("/orders", authenticate, async (req: AuthenticatedRequest, res: Response) => {
+flightsRouter.post("/orders", authenticate, requireAdminWhileDuffelTest, async (req: AuthenticatedRequest, res: Response) => {
 	try {
 		const body = createOrderSchema.parse(req.body);
 		const order = await createFlightOrder({

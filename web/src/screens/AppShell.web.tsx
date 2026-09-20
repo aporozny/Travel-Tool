@@ -14,15 +14,7 @@ import CommunityScreen from './CommunityScreen.web';
 import TripsScreen from './TripsScreen.web';
 import FlightsScreen from './FlightsScreen.web';
 import StaysScreen from './StaysScreen.web';
-import UnderConstructionScreen from './UnderConstructionScreen.web';
 import useIsMobile from '../hooks/useIsMobile.web';
-
-// Duffel is still on a test/sandbox API key (duffel_test_...), not live --
-// a "confirmed" booking today doesn't issue a real ticket. Gate Flights
-// behind an under-construction screen so a real visitor can't be misled
-// into thinking they've booked something. Flip this back to false (and
-// remove it) once DUFFEL_API_KEY is switched to a duffel_live_ key.
-const DUFFEL_IS_TEST_MODE = true;
 
 type Tab = 'explore' | 'community' | 'trips' | 'flights' | 'stays' | 'bookings' | 'safety' | 'profile' | 'dashboard' | 'members' | 'messages';
 
@@ -96,9 +88,7 @@ export default function AppShell() {
     switch (tab) {
       case 'community': return <CommunityScreen />;
       case 'trips':     return <TripsScreen />;
-      case 'flights':   return DUFFEL_IS_TEST_MODE
-        ? <UnderConstructionScreen title="Flights" message="Flight booking is almost ready — we're finishing up final testing before it goes live. Check back soon." />
-        : <FlightsScreen />;
+      case 'flights':   return <FlightsScreen />;
       case 'stays':     return <StaysScreen />;
       case 'explore':   return <ExploreScreen onSelectOperator={(op: any) => setDetail({ type: 'operator', data: op })} detail={detail} onClearDetail={() => setDetail(null)} />;
       case 'bookings':  return <BookingsScreen />;
