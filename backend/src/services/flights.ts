@@ -114,7 +114,7 @@ function searchKeyFor(params: FlightSearchParams): string {
 // aren't selected here yet, since no product decision on differentiated
 // pricing has been made (see markup_rules' seed row: 8%, $5-150 cap,
 // explicitly a placeholder).
-interface MarkupRule {
+export interface MarkupRule {
 	id: string;
 	markup_type: string;
 	markup_value: string;
@@ -122,7 +122,7 @@ interface MarkupRule {
 	max_fee: string | null;
 }
 
-async function getActiveMarkupRule(): Promise<MarkupRule> {
+export async function getActiveMarkupRule(): Promise<MarkupRule> {
 	const { rows } = await pool.query(
 		`SELECT id, markup_type, markup_value, min_fee, max_fee FROM markup_rules WHERE scope = 'global' AND active = true LIMIT 1`
 	);
@@ -130,7 +130,7 @@ async function getActiveMarkupRule(): Promise<MarkupRule> {
 	return rows[0];
 }
 
-function computeMarkup(baseAmount: number, rule: MarkupRule): { totalAmount: number; markupAmount: number; ruleId: string } {
+export function computeMarkup(baseAmount: number, rule: MarkupRule): { totalAmount: number; markupAmount: number; ruleId: string } {
 	let markupAmount = rule.markup_type === "percentage" ? baseAmount * parseFloat(rule.markup_value) : parseFloat(rule.markup_value);
 	if (rule.min_fee != null) markupAmount = Math.max(markupAmount, parseFloat(rule.min_fee));
 	if (rule.max_fee != null) markupAmount = Math.min(markupAmount, parseFloat(rule.max_fee));

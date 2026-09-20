@@ -2,6 +2,7 @@ import crypto from "crypto";
 import { redis } from "../utils/redis";
 import { tripgicPost } from "../utils/tripgicClient";
 import type { StaysSearchParams, StaysAccommodationView } from "./stays";
+import { getActiveMarkupRule, computeMarkup, type MarkupRule } from "./flights";
 
 // TripGic hotel search, alongside Travelport/Duffel Stays -- browse only,
 // no booking, no markup (same posture as the other providers on this
@@ -76,7 +77,10 @@ export function isValidSearchId(value: string): boolean {
 }
 
 function searchIdFor(params: StaysSearchParams): string {
+	// "v2": results are cached with markup baked in, so entries written
+	// before markup was applied must not be served.
 	const canonical = JSON.stringify([
+		"v2",
 		params.destination.trim().toLowerCase(),
 		params.checkInDate,
 		params.checkOutDate,
@@ -94,7 +98,7 @@ function requireConfigured(): void {
 
 // Drift's search takes total adults + rooms; TripGic takes adults per room.
 // Spread adults evenly, never more rooms than adults (an empty room isn't valid).
-function buildOccupancies(rooms: number, adults: number): { adult: string }[] {
+export function buildOccupancies(rooms: number, adults: number): { adult: string }[] {
 	const roomCount = Math.max(1, Math.min(rooms, adults));
 	const base = Math.floor(adults / roomCount);
 	const remainder = adults % roomCount;
@@ -129,8 +133,10 @@ function toNumberOrNull(value: string | number | null | undefined): number | nul
 	return Number.isFinite(n) ? n : null;
 }
 
-function toAccommodationView(row: TripgicHotelRow, destination: string): StaysAccommodationView {
+function toAccommodationView(row: TripgicHotelRow, destination: string, rule: MarkupRule): StaysAccommodationView {
 	const { cityName, countryCode } = cityAndCountry(row.address, destination);
+	// Marked-up, so the price on the card is the price the traveller books at.
+	const charged = Math.round(computeMarkup(row.total_amount, rule).totalAmount * 100) / 100;
 	return {
 		id: row.room_tracking_id,
 		accommodationId: row.hotel_id,
@@ -144,7 +150,7 @@ function toAccommodationView(row: TripgicHotelRow, destination: string): StaysAc
 		reviewCount: null,
 		photoUrls: row.primary_photo ? [row.primary_photo] : [],
 		amenityTypes: Array.from(new Set((row.facility ?? []).map((f) => f.title))).slice(0, 12),
-		cheapestRateTotalAmount: String(row.total_amount),
+		cheapestRateTotalAmount: charged.toFixed(2),
 		cheapestRateCurrency: row.currency,
 		latitude: toNumberOrNull(row.latitude),
 		longitude: toNumberOrNull(row.longitude),
@@ -183,7 +189,8 @@ async function runSearch(searchId: string, params: StaysSearchParams): Promise<v
 
 		const priced = rows.filter((r) => Number.isFinite(r.total_amount) && r.total_amount > 0);
 		priced.sort((a, b) => a.total_amount - b.total_amount);
-		const results = priced.slice(0, MAX_RESULTS).map((r) => toAccommodationView(r, params.destination));
+		const rule = await getActiveMarkupRule();
+		const results = priced.slice(0, MAX_RESULTS).map((r) => toAccommodationView(r, params.destination, rule));
 
 		await redis.set(k.result, JSON.stringify({ results, totalFound: priced.length }), "EX", RESULT_TTL_SECONDS);
 	} catch (err) {

@@ -1,5 +1,5 @@
 import { tripgicPost } from "../utils/tripgicClient";
-import type { FlightSearchParams, FlightOfferView, FlightSliceView } from "./flights";
+import { getActiveMarkupRule, computeMarkup, type FlightSearchParams, type FlightOfferView, type FlightSliceView, type MarkupRule } from "./flights";
 
 // TripGic flight search, alongside Duffel and Travelport -- not a
 // replacement. See tripgicClient.ts for auth details. Search/compare only
@@ -35,7 +35,7 @@ interface TripgicRoute {
 	marketing: { carrier_name?: string; flight_number?: string; carrier_logo?: string };
 }
 
-interface TripgicFlightGroup {
+export interface TripgicFlightGroup {
 	flight_time: string | null; // total journey time for this direction, including layovers
 	routes: TripgicRoute[];
 }
@@ -109,7 +109,12 @@ function toSliceView(group: TripgicFlightGroup): FlightSliceView {
 	};
 }
 
-function toOfferView(offer: TripgicOffer, adults: number, logoBaseUrl: string | undefined): FlightOfferView {
+// Shared with tripgicBooking.ts, which freezes the validated itinerary into the order.
+export function mapTripgicSlices(groups: TripgicFlightGroup[]): FlightSliceView[] {
+	return groups.map(toSliceView);
+}
+
+function toOfferView(offer: TripgicOffer, adults: number, logoBaseUrl: string | undefined, rule: MarkupRule): FlightOfferView {
 	const firstMarketing = offer.flight_group?.[0]?.routes?.[0]?.marketing;
 	const logoFile = firstMarketing?.carrier_logo;
 	return {
@@ -122,7 +127,10 @@ function toOfferView(offer: TripgicOffer, adults: number, logoBaseUrl: string | 
 		passengers: Array.from({ length: adults }, (_, i) => ({ id: `pax-${i}`, type: "adult", age: null })),
 		baseAmount: Number(offer.price.base_fare),
 		taxAmount: Number(offer.price.tax),
-		totalAmount: Number(offer.price.total), // no markup applied -- nothing bookable through Drift yet
+		// The marked-up price -- what the traveller pays at booking. Showing
+		// raw cost here and marking up at checkout would make every fare
+		// jump when the traveller clicked Book. Same rule as Duffel's.
+		totalAmount: Math.round(computeMarkup(Number(offer.price.total), rule).totalAmount * 100) / 100,
 		currency: offer.price.currency,
 		expiresAt: "", // per-offer expiry isn't in the search response; validate returns a session expiry instead
 		provider: "tripgic",
@@ -161,5 +169,6 @@ export async function searchTripgicFlights(params: FlightSearchParams): Promise<
 	}
 
 	const logoBaseUrl = response.resources?.base_url?.carrier;
-	return (response.data ?? []).map((offer) => toOfferView(offer, params.adults, logoBaseUrl));
+	const rule = await getActiveMarkupRule();
+	return (response.data ?? []).map((offer) => toOfferView(offer, params.adults, logoBaseUrl, rule));
 }
