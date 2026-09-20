@@ -5,6 +5,7 @@ import type { Offer } from "@duffel/api/booking/Offers/OfferTypes";
 import crypto from "crypto";
 import { pool } from "../utils/db";
 import { getDuffelClient as getClient } from "../utils/duffelClient";
+import { notifyOrderChanged } from "./tripNotifications";
 
 // Flight search/booking via Duffel. Ships inactive: every function below
 // throws a clear "not configured" error until DUFFEL_API_KEY is set --
@@ -400,6 +401,7 @@ export async function createFlightOrder(params: {
 		);
 	}
 
+	notifyOrderChanged("duffel", flightOrderRow.id);
 	return { id: flightOrderRow.id, bookingReference: flightOrderRow.booking_reference, status: flightOrderRow.status };
 }
 

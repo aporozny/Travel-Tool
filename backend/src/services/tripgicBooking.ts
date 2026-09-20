@@ -4,6 +4,7 @@ import { tripgicPost } from "../utils/tripgicClient";
 import { getActiveMarkupRule, computeMarkup, type FlightSliceView } from "./flights";
 import { mapTripgicSlices } from "./tripgicFlights";
 import { buildOccupancies } from "./tripgicStays";
+import { notifyOrderChanged } from "./tripNotifications";
 
 // Booking through TripGic: flights and hotels.
 //
@@ -636,9 +637,13 @@ export async function createTripgicFlightOrder(params: {
 		});
 		if (issued.status !== "success") {
 			console.error(`TripGic issue-ticket failed for ${created.general.tracking_id}:`, issued.reason);
-			return rowToView(await markOrder(row.id, { fulfilmentError: classifyFailure(issued.reason) }));
+			const held = await markOrder(row.id, { fulfilmentError: classifyFailure(issued.reason) });
+			notifyOrderChanged("tripgic", held.id);
+			return rowToView(held);
 		}
-		return rowToView(await markOrder(row.id, { status: "ticketed", fulfilled: true }));
+		const ticketed = await markOrder(row.id, { status: "ticketed", fulfilled: true });
+		notifyOrderChanged("tripgic", ticketed.id);
+		return rowToView(ticketed);
 	});
 }
 
@@ -726,7 +731,10 @@ export async function createTripgicHotelOrder(params: {
 				contactEmail: params.contact.email,
 			},
 		});
-		if (!held) return rowToView(row);
+		if (!held) {
+			notifyOrderChanged("tripgic", row.id);
+			return rowToView(row);
+		}
 
 		const issued = await tripgicPost<TripgicResult>("/hotel/issue-voucher", {
 			member_id: memberId(),
@@ -736,9 +744,13 @@ export async function createTripgicHotelOrder(params: {
 		});
 		if (issued.status !== "success") {
 			console.error(`TripGic issue-voucher failed for ${created.general.tracking_id}:`, issued.reason);
-			return rowToView(await markOrder(row.id, { fulfilmentError: classifyFailure(issued.reason) }));
+			const stillHeld = await markOrder(row.id, { fulfilmentError: classifyFailure(issued.reason) });
+			notifyOrderChanged("tripgic", stillHeld.id);
+			return rowToView(stillHeld);
 		}
-		return rowToView(await markOrder(row.id, { status: "confirmed", fulfilled: true }));
+		const confirmed = await markOrder(row.id, { status: "confirmed", fulfilled: true });
+		notifyOrderChanged("tripgic", confirmed.id);
+		return rowToView(confirmed);
 	});
 }
 
@@ -749,9 +761,10 @@ export async function listTripgicOrders(userId: string): Promise<OrderView[]> {
 	// showing a reservation that no longer exists.
 	await pool.query(
 		`UPDATE tripgic_orders SET status = 'expired', updated_at = NOW()
-		 WHERE user_id = $1 AND status = 'held' AND hold_expires_at IS NOT NULL AND hold_expires_at < NOW()`,
+		 WHERE user_id = $1 AND status = 'held' AND hold_expires_at IS NOT NULL AND hold_expires_at < NOW()
+		 RETURNING id`,
 		[userId]
-	);
+	).then((r) => r.rows.forEach((o: { id: string }) => notifyOrderChanged("tripgic", o.id)));
 	const { rows } = await pool.query("SELECT * FROM tripgic_orders WHERE user_id = $1 ORDER BY created_at DESC", [userId]);
 	return rows.map(rowToView);
 }
@@ -786,6 +799,7 @@ async function syncOrderFromTripgic(order: any): Promise<any> {
 			 WHERE id = $1 RETURNING *`,
 			[order.id, status, autoCancel && order.hold_expires_at ? new Date(autoCancel * 1000) : null]
 		);
+		if (status && rows[0]) notifyOrderChanged("tripgic", rows[0].id);
 		return rows[0];
 	} catch (err) {
 		console.error(`TripGic order sync failed for ${order.tripgic_tracking_id}:`, err);
@@ -823,5 +837,6 @@ export async function cancelTripgicOrder(userId: string, orderId: string): Promi
 		`UPDATE tripgic_orders SET status = 'cancelled', cancelled_at = NOW(), updated_at = NOW() WHERE id = $1 RETURNING *`,
 		[orderId]
 	);
+	notifyOrderChanged("tripgic", updated[0].id);
 	return rowToView(updated[0]);
 }

@@ -29,6 +29,8 @@ import { flightsRouter } from './routes/flights';
 import { staysRouter } from './routes/stays';
 import { tripgicRouter } from './routes/tripgic';
 import { currenciesRouter } from './routes/currencies';
+import { notificationsRouter } from './routes/notifications';
+import { startNotificationWorker } from './services/tripNotificationWorker';
 import { voiceAgentRouter } from './routes/voiceAgent';
 import { errorHandler } from './middleware/errorHandler';
 import { notFound } from './middleware/notFound';
@@ -76,6 +78,7 @@ app.use('/api/v1/flights', flightsRouter);
 app.use('/api/v1/stays', staysRouter);
 app.use('/api/v1/tripgic', tripgicRouter);
 app.use('/api/v1/currencies', currenciesRouter);
+app.use('/api/v1/notifications', notificationsRouter);
 
 // Error handling
 app.use(notFound);
@@ -86,5 +89,6 @@ export default app;
 if (require.main === module) {
   app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
+    startNotificationWorker();
   });
 }

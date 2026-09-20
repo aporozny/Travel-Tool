@@ -32,6 +32,8 @@ interface Leg {
 
 interface TravelBooking {
   key: string;
+  orderId: string;
+  source: 'tripgic' | 'duffel';
   kind: 'flight' | 'hotel';
   provider: 'tripgic' | 'duffel';
   status: string;
@@ -105,6 +107,8 @@ function fromTripgic(o: any): TravelBooking {
   const people = (isFlight ? d.passengers : d.guests ?? []) ?? [];
   return {
     key: `tg-${o.id}`,
+    orderId: String(o.id),
+    source: 'tripgic',
     kind: isFlight ? 'flight' : 'hotel',
     provider: 'tripgic',
     status: o.status,
@@ -132,6 +136,8 @@ function fromDuffel(o: any): TravelBooking {
   const route = legs.length ? `${legs[0].from} to ${legs[legs.length - 1].to}` : 'Flight';
   return {
     key: `df-${o.id}`,
+    orderId: String(o.id),
+    source: 'duffel',
     kind: 'flight',
     provider: 'duffel',
     status: o.status === 'confirmed' ? 'ticketed' : o.status,
@@ -152,6 +158,22 @@ function fromDuffel(o: any): TravelBooking {
   };
 }
 
+interface ScheduledReminder { type: string; sendAt: string; status: string; source: string; orderId: string }
+
+const REMINDER_LABEL: Record<string, string> = {
+  pre_7d: '1 week before', pre_72h: '3 days before', pre_24h: '1 day before', pre_3h: '3 hours before', hotel_checkin: 'Check-in day',
+};
+
+// Upcoming reminders for one booking, e.g. "1 week before (Tue 13 Oct)".
+function upcomingReminders(b: TravelBooking, all: ScheduledReminder[]): string[] {
+  const seen = new Set<string>();
+  return all
+    .filter((r) => r.source === b.source && r.orderId === b.orderId && r.status === 'pending' && REMINDER_LABEL[r.type] && new Date(r.sendAt).getTime() > Date.now() - 60000)
+    .sort((a, c) => new Date(a.sendAt).getTime() - new Date(c.sendAt).getTime())
+    .map((r) => `${REMINDER_LABEL[r.type]} (${new Date(r.sendAt).toLocaleString('en-AU', { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: false })})`)
+    .filter((line) => (seen.has(line) ? false : (seen.add(line), true)));
+}
+
 const STATUS: Record<string, { label: string; tone: 'good' | 'wait' | 'off' | 'bad'; note: string }> = {
   held:      { label: 'Reserved',  tone: 'wait', note: "Your seats are held, but the ticket hasn't been issued yet." },
   ticketed:  { label: 'Ticketed',  tone: 'good', note: 'Your tickets are issued.' },
@@ -161,7 +183,8 @@ const STATUS: Record<string, { label: string; tone: 'good' | 'wait' | 'off' | 'b
   failed:    { label: 'Failed',    tone: 'bad',  note: 'This booking could not be completed.' },
 };
 
-function Card({ b }: { b: TravelBooking }) {
+function Card({ b, reminders }: { b: TravelBooking; reminders: ScheduledReminder[] }) {
+  const coming = upcomingReminders(b, reminders);
   const st = STATUS[b.status] ?? { label: b.status, tone: 'off' as const, note: '' };
   return (
     <div style={s.card}>
@@ -205,6 +228,15 @@ function Card({ b }: { b: TravelBooking }) {
         <div style={s.viaLine}>Booked through Drift · via {b.provider === 'tripgic' ? 'TripGic' : 'Duffel'}</div>
       </div>
 
+      {(coming.length > 0 || (b.status === 'held' && !b.testBooking)) && (
+        <div style={s.reminders}>
+          <div style={s.remindersTitle}>Reminders</div>
+          {coming.length > 0
+            ? coming.map((line) => <div key={line} style={s.reminderLine}>{line}</div>)
+            : <div style={s.reminderLine}>You'll get reminders once your ticket is issued.</div>}
+        </div>
+      )}
+
       <div style={s.note}>
         {b.message ?? st.note}
         {b.status === 'held' && b.holdExpiresAt && <> Held until {new Date(b.holdExpiresAt).toLocaleString('en-AU', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: false })}.</>}
@@ -223,15 +255,17 @@ function routeTitle(legs: Leg[]): string {
 
 export function TravelBookings({ onLoaded }: { onLoaded?: (count: number) => void }) {
   const [items, setItems] = useState<TravelBooking[] | null>(null);
+  const [reminders, setReminders] = useState<ScheduledReminder[]>([]);
 
   useEffect(() => {
     let alive = true;
-    Promise.allSettled([api.get('/tripgic/orders'), api.get('/flights/orders')]).then(([tg, df]) => {
+    Promise.allSettled([api.get('/tripgic/orders'), api.get('/flights/orders'), api.get('/notifications/schedule')]).then(([tg, df, sc]) => {
       if (!alive) return;
       const all: TravelBooking[] = [];
       if (tg.status === 'fulfilled') for (const o of tg.value.data.orders ?? []) all.push(fromTripgic(o));
       if (df.status === 'fulfilled') for (const o of df.value.data.orders ?? []) all.push(fromDuffel(o));
       setItems(all);
+      if (sc.status === 'fulfilled') setReminders(sc.value.data.items ?? []);
       onLoaded?.(all.length);
     });
     return () => { alive = false; };
@@ -251,13 +285,13 @@ export function TravelBookings({ onLoaded }: { onLoaded?: (count: number) => voi
       {upcoming.length > 0 && (
         <>
           <div style={s.groupLabel}>Upcoming</div>
-          {upcoming.map((b) => <Card key={b.key} b={b} />)}
+          {upcoming.map((b) => <Card key={b.key} b={b} reminders={reminders} />)}
         </>
       )}
       {rest.length > 0 && (
         <>
           <div style={s.groupLabel}>Past, cancelled or expired</div>
-          {rest.map((b) => <Card key={b.key} b={b} />)}
+          {rest.map((b) => <Card key={b.key} b={b} reminders={reminders} />)}
         </>
       )}
     </div>
@@ -290,5 +324,8 @@ const s: Record<string, React.CSSProperties> = {
   k: { display: 'inline-block', minWidth: 96, color: C.muted, fontSize: 12 },
   test: { color: C.goldDark, fontSize: 12 },
   viaLine: { fontSize: 11, color: C.muted, marginTop: 2 },
+  reminders: { marginTop: 10, fontSize: 12, color: C.text },
+  remindersTitle: { fontSize: 11, fontWeight: 700, color: C.goldDark, textTransform: 'uppercase', letterSpacing: '0.4px', marginBottom: 3 },
+  reminderLine: { color: C.muted, lineHeight: 1.6 },
   note: { background: C.bg, borderRadius: 8, padding: '8px 12px', fontSize: 12, color: C.text, marginTop: 10 },
 };

@@ -20,7 +20,8 @@ let pass = 0, fail = 0;
 const check = (name, ok, extra = "") => { (ok ? pass++ : fail++); console.log(`${ok ? "PASS" : "FAIL"}  ${name}${extra ? "  -- " + extra : ""}`); };
 
 (async () => {
-  const { rows } = await pool.query("SELECT id, email, role FROM users WHERE is_active = true AND role = 'admin' ORDER BY created_at LIMIT 1");
+  // The seeded test admin (drifttest.com): trip emails to that domain are suppressed, so running this never emails a real person.
+  const { rows } = await pool.query("SELECT id, email, role FROM users WHERE is_active = true AND role = 'admin' AND email LIKE '%@drifttest.com' ORDER BY created_at LIMIT 1");
   const u = rows[0];
   const second = (await pool.query("SELECT id FROM users WHERE is_active = true AND role = 'admin' AND id <> $1 LIMIT 1", [u.id])).rows[0];
   const plain = (await pool.query("SELECT id FROM users WHERE is_active = true AND role = 'traveler' LIMIT 1")).rows[0];

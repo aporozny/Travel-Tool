@@ -30,7 +30,14 @@ interface BookingNotification {
   guests: number;
 }
 
-export async function sendEmail(to: string, subject: string, text: string): Promise<boolean> {
+export interface SendEmailOptions {
+  html?: string;
+  headers?: Record<string, string>;
+  // SendGrid sandbox mode: the request is validated but nothing is delivered.
+  dryRun?: boolean;
+}
+
+export async function sendEmail(to: string, subject: string, text: string, options: SendEmailOptions = {}): Promise<boolean> {
   if (!process.env.SENDGRID_API_KEY) {
     console.log('SENDGRID_API_KEY not set - skipping email to', to);
     return false;
@@ -46,6 +53,9 @@ export async function sendEmail(to: string, subject: string, text: string): Prom
       from: process.env.SENDGRID_FROM_EMAIL || 'safety@drifttravel.app',
       subject,
       text,
+      ...(options.html ? { html: options.html } : {}),
+      ...(options.headers ? { headers: options.headers } : {}),
+      ...(options.dryRun ? { mailSettings: { sandboxMode: { enable: true } } } : {}),
     });
     return true;
   } catch (err) {
