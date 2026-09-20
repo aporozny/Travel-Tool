@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import api from '../services/api.web';
 import { useTripgicBookingEnabled, TripgicHotelCheckout, TripgicOrders, type HotelSearchContext } from './TripgicCheckout.web';
+import { Price, CurrencySelect } from '../services/currency.web';
 
 // Matches FlightsScreen.web.tsx / AppShell.web.tsx design tokens exactly.
 const C = {
@@ -166,9 +167,12 @@ export default function StaysScreen() {
             <input style={s.input} type="number" min={1} max={16} value={adults} onChange={(e) => setAdults(parseInt(e.target.value, 10) || 1)} />
           </div>
         </div>
-        <button style={s.searchBtn} disabled={loading} onClick={handleSearch}>
-          {loading ? 'Searching...' : 'Search stays'}
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap' }}>
+          <button style={s.searchBtn} disabled={loading} onClick={handleSearch}>
+            {loading ? 'Searching...' : 'Search stays'}
+          </button>
+          <CurrencySelect />
+        </div>
       </div>
 
       {/* The fast providers' error only matters when nothing else turned up. */}
@@ -201,9 +205,11 @@ export default function StaysScreen() {
               <div style={s.stayHeader}>
                 <span style={s.stayName}>{r.name}</span>
                 <span style={s.providerTag}>via {PROVIDER_LABELS[r.provider]}</span>
-                <span style={s.price}>
-                  {r.cheapestRateTotalAmount ? `$${r.cheapestRateTotalAmount} ${r.cheapestRateCurrency}` : 'Price unavailable'}
-                </span>
+                {r.cheapestRateTotalAmount && r.cheapestRateCurrency ? (
+                  <Price amount={parseFloat(r.cheapestRateTotalAmount)} currency={r.cheapestRateCurrency} style={s.price} />
+                ) : (
+                  <span style={s.price}>{r.cheapestRateTotalAmount ? `$${r.cheapestRateTotalAmount}` : 'Price unavailable'}</span>
+                )}
               </div>
               <p style={s.staySub}>
                 {r.cityName}{r.cityName && r.countryCode ? ', ' : ''}{r.countryCode}

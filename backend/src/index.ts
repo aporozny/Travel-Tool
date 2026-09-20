@@ -28,6 +28,7 @@ import { tripsRouter } from './routes/trips';
 import { flightsRouter } from './routes/flights';
 import { staysRouter } from './routes/stays';
 import { tripgicRouter } from './routes/tripgic';
+import { currenciesRouter } from './routes/currencies';
 import { voiceAgentRouter } from './routes/voiceAgent';
 import { errorHandler } from './middleware/errorHandler';
 import { notFound } from './middleware/notFound';
@@ -74,6 +75,7 @@ app.use('/api/v1/trips', tripsRouter);
 app.use('/api/v1/flights', flightsRouter);
 app.use('/api/v1/stays', staysRouter);
 app.use('/api/v1/tripgic', tripgicRouter);
+app.use('/api/v1/currencies', currenciesRouter);
 
 // Error handling
 app.use(notFound);

@@ -6,6 +6,7 @@ import { searchFlights, createCheckoutPaymentIntent, confirmCheckoutPaymentInten
 import { searchTravelportFlights } from "../services/travelportFlights";
 import { searchTripgicFlights } from "../services/tripgicFlights";
 import { isDuffelTestMode } from "../utils/duffelClient";
+import { getRateTable, convert } from "../services/fx";
 
 // Duffel's own validation errors (expired fare, an offer that's already
 // been booked from the same search, etc.) have a clear human-readable
@@ -82,7 +83,14 @@ flightsRouter.post("/search", authenticate, async (req: AuthenticatedRequest, re
 		} else {
 			console.error("TripGic flight search failed (non-fatal, Duffel results still returned):", tripgicResult.reason);
 		}
-		offers.sort((a, b) => a.totalAmount - b.totalAmount);
+		// Providers quote in different currencies (Duffel AUD, TripGic and Travelport
+		// USD), so comparing the raw numbers puts a USD 198 fare ahead of an AUD
+		// 215 one even though it costs more. Order by value in one common currency
+		// (EUR, the rate table's base). Each offer still carries its own currency.
+		// If no rates are available, fall back to the raw number rather than fail.
+		const rates = await getRateTable();
+		const sortKey = (o: FlightOfferView) => convert(rates, o.totalAmount, o.currency, "EUR") ?? o.totalAmount;
+		offers.sort((a, b) => sortKey(a) - sortKey(b));
 
 		return res.json({ offers });
 	} catch (err) {

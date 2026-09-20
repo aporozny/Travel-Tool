@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import api from '../services/api.web';
 import { useTripgicBookingEnabled, TripgicFlightCheckout, TripgicOrders } from './TripgicCheckout.web';
+import { Price, CurrencySelect } from '../services/currency.web';
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements, CardNumberElement, CardExpiryElement, CardCvcElement, useStripe, useElements } from '@stripe/react-stripe-js';
 
@@ -501,9 +502,12 @@ export default function FlightsScreen() {
             </select>
           </div>
         </div>
-        <button style={s.searchBtn} disabled={loading} onClick={handleSearch}>
-          {loading ? 'Searching...' : 'Search flights'}
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap' }}>
+          <button style={s.searchBtn} disabled={loading} onClick={handleSearch}>
+            {loading ? 'Searching...' : 'Search flights'}
+          </button>
+          <CurrencySelect />
+        </div>
       </div>
 
       {error && <div style={s.error}>{error}</div>}
@@ -526,7 +530,7 @@ export default function FlightsScreen() {
                 {offer.airlineLogoUrl && <img src={offer.airlineLogoUrl} alt={offer.airline} style={s.airlineLogo} />}
                 <span style={s.airlineName}>{offer.airline}</span>
                 <span style={s.providerTag}>via {PROVIDER_LABELS[offer.provider]}</span>
-                <span style={s.price}>${offer.totalAmount.toFixed(2)} {offer.currency}</span>
+                <Price amount={offer.totalAmount} currency={offer.currency} style={s.price} />
               </div>
 
               {offer.slices.map((slice, i) => (

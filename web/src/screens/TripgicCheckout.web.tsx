@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import api from '../services/api.web';
+import { Price, usePriceText } from '../services/currency.web';
 
 // Booking UI for TripGic flights and hotels (backend: routes/tripgic.ts,
 // services/tripgicBooking.ts). The client never sends a price: the quote
@@ -142,7 +143,7 @@ function PriceBar({ quote }: { quote: Quote }) {
     <div style={s.priceBar}>
       <div>
         <div style={s.priceLabel}>Total</div>
-        <div style={s.priceValue}>{money(quote.totalAmount, quote.currency)}</div>
+        <Price amount={quote.totalAmount} currency={quote.currency} style={s.priceValue} align="flex-start" />
       </div>
       {quote.priceChanged && quote.previousAmount != null && (
         <div style={s.priceChanged}>Price changed from {money(quote.previousAmount, quote.currency)}</div>
@@ -167,6 +168,7 @@ function OrderResult({ order, onClose }: { order: TripgicOrder; onClose: () => v
         {order.paymentStatus === 'not_collected_sandbox' && <div style={s.summaryRow}><span>Payment</span><strong>Test booking -- not charged</strong></div>}
         {order.holdExpiresAt && !good && <div style={s.summaryRow}><span>Held until</span><strong>{new Date(order.holdExpiresAt).toLocaleString()}</strong></div>}
       </div>
+      <p style={s.roomMeta}>You can find this booking any time under <strong>Bookings</strong>.</p>
       <button style={s.primaryBtn} onClick={onClose}>Done</button>
     </>
   );
@@ -177,6 +179,7 @@ function OrderResult({ order, onClose }: { order: TripgicOrder; onClose: () => v
 const emptyFlightPax = (): FlightPax => ({ title: 'mr', gender: 'm', givenName: '', familyName: '', bornOn: '', passportNumber: '', passportCountry: 'AU', passportExpiry: '' });
 
 export function TripgicFlightCheckout({ offerId, onClose, onBooked }: { offerId: string; onClose: () => void; onBooked: (order: TripgicOrder) => void }) {
+  const priceText = usePriceText();
   const [quote, setQuote] = useState<Quote | null>(null);
   const [loadError, setLoadError] = useState('');
   const [pax, setPax] = useState<FlightPax[]>([]);
@@ -263,7 +266,7 @@ export function TripgicFlightCheckout({ offerId, onClose, onBooked }: { offerId:
             <label style={s.check}><input type="checkbox" checked={acceptPrice} onChange={(e) => setAcceptPrice(e.target.checked)} /> I accept the new price</label>
           )}
           <button style={{ ...s.primaryBtn, opacity: canSubmit ? 1 : 0.5 }} disabled={!canSubmit} onClick={submit}>
-            {submitting ? 'Booking...' : `Book -- ${money(quote.totalAmount, quote.currency)}`}
+            {submitting ? 'Booking...' : `Book -- ${priceText(quote.totalAmount, quote.currency)}`}
           </button>
         </>
       )}
@@ -293,6 +296,7 @@ const emptyGuest = (): Person => ({ title: 'mr', gender: 'm', givenName: '', fam
 export function TripgicHotelCheckout({ hotelId, hotelName, search, onClose, onBooked }: {
   hotelId: string; hotelName: string; search: HotelSearchContext; onClose: () => void; onBooked: (order: TripgicOrder) => void;
 }) {
+  const priceText = usePriceText();
   const [rooms, setRooms] = useState<Room[] | null>(null);
   const [trackingId, setTrackingId] = useState('');
   const [loadError, setLoadError] = useState('');
@@ -372,7 +376,7 @@ export function TripgicHotelCheckout({ hotelId, hotelName, search, onClose, onBo
             <div key={r.roomTrackingId} style={s.roomCard}>
               <div style={s.roomTop}>
                 <span style={s.roomTitle}>{r.title}</span>
-                <span style={s.roomPrice}>{money(r.totalAmount, r.currency)}</span>
+                <Price amount={r.totalAmount} currency={r.currency} style={s.roomPrice} />
               </div>
               <div style={s.roomMeta}>
                 {r.beds.join(' or ')}{r.meals.length > 0 && ` · ${r.meals.join(', ')}`}
@@ -410,7 +414,7 @@ export function TripgicHotelCheckout({ hotelId, hotelName, search, onClose, onBo
             <label style={s.check}><input type="checkbox" checked={acceptPrice} onChange={(e) => setAcceptPrice(e.target.checked)} /> I accept the new price</label>
           )}
           <button style={{ ...s.primaryBtn, opacity: canSubmit ? 1 : 0.5 }} disabled={!canSubmit} onClick={submit}>
-            {submitting ? 'Booking...' : `Book -- ${money(quote.totalAmount, quote.currency)}`}
+            {submitting ? 'Booking...' : `Book -- ${priceText(quote.totalAmount, quote.currency)}`}
           </button>
           <button style={s.linkBtn} onClick={() => { setQuote(null); setError(''); }}>Choose a different room</button>
         </>
