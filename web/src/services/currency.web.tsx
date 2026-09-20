@@ -120,6 +120,27 @@ export function usePriceText() {
   };
 }
 
+// Total of several prices that may be in different currencies, shown in the
+// chosen currency where every one can be converted. Null if it cannot be done
+// honestly (the caller then lists the prices separately).
+export function sumPrices(items: { amount: number; currency: string }[], to: string | null): string | null {
+  if (items.length === 0) return null;
+  const cur = items[0].currency;
+  if (items.every((i) => i.currency === cur)) {
+    const total = items.reduce((a, i) => a + i.amount, 0);
+    const p = priceParts(total, cur, to);
+    return p.converted ? `${p.main} (${money(total, cur)})` : p.main;
+  }
+  if (!to) return null;
+  let sum = 0;
+  for (const i of items) {
+    const v = convertAmount(i.amount, i.currency, to);
+    if (v == null) return null;
+    sum += v;
+  }
+  return `≈ ${money(sum, to)}`;
+}
+
 export function CurrencySelect({ style }: { style?: React.CSSProperties }) {
   const { currency, list, ready, setCurrency, rateDate } = useCurrency();
   if (!ready || !currency) return null;

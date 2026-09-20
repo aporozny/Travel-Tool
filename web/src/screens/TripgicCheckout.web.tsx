@@ -73,9 +73,9 @@ export interface TripgicOrder {
   createdAt: string;
 }
 
-interface Contact { email: string; isdCode: string; phoneNumber: string }
+export interface Contact { email: string; isdCode: string; phoneNumber: string }
 interface Person { title: 'mr' | 'ms' | 'mrs' | 'miss'; gender: 'm' | 'f'; givenName: string; familyName: string }
-interface FlightPax extends Person { bornOn: string; passportNumber: string; passportCountry: string; passportExpiry: string }
+export interface FlightPax extends Person { bornOn: string; passportNumber: string; passportCountry: string; passportExpiry: string }
 
 const money = (amount: number, currency: string) => `$${amount.toFixed(2)} ${currency}`;
 const digits = (v: string) => v.replace(/\D/g, '');
@@ -178,12 +178,22 @@ function OrderResult({ order, onClose }: { order: TripgicOrder; onClose: () => v
 
 const emptyFlightPax = (): FlightPax => ({ title: 'mr', gender: 'm', givenName: '', familyName: '', bornOn: '', passportNumber: '', passportCountry: 'AU', passportExpiry: '' });
 
-export function TripgicFlightCheckout({ offerId, onClose, onBooked }: { offerId: string; onClose: () => void; onBooked: (order: TripgicOrder) => void }) {
+// prefill / onDetails let a second booking (the return flight of a mix-and-match
+// trip) start with the passenger and contact details from the first, so nobody
+// types them twice. They only ever live in the browser; nothing extra is stored.
+export function TripgicFlightCheckout({ offerId, heading, prefill, onDetails, onClose, onBooked }: {
+  offerId: string;
+  heading?: string;
+  prefill?: { passengers: FlightPax[]; contact: Contact } | null;
+  onDetails?: (passengers: FlightPax[], contact: Contact) => void;
+  onClose: () => void;
+  onBooked: (order: TripgicOrder) => void;
+}) {
   const priceText = usePriceText();
   const [quote, setQuote] = useState<Quote | null>(null);
   const [loadError, setLoadError] = useState('');
   const [pax, setPax] = useState<FlightPax[]>([]);
-  const [contact, setContact] = useState<Contact>({ email: '', isdCode: '61', phoneNumber: '' });
+  const [contact, setContact] = useState<Contact>(prefill?.contact ?? { email: '', isdCode: '61', phoneNumber: '' });
   const [acceptPrice, setAcceptPrice] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -195,7 +205,7 @@ export function TripgicFlightCheckout({ offerId, onClose, onBooked }: { offerId:
       .then((res) => {
         if (!alive) return;
         setQuote(res.data);
-        setPax(Array.from({ length: res.data.adultCount }, emptyFlightPax));
+        setPax(Array.from({ length: res.data.adultCount }, (_, i) => (prefill?.passengers[i] ? { ...prefill.passengers[i] } : emptyFlightPax())));
       })
       .catch((err) => { if (alive) setLoadError(apiMessage(err, 'Could not confirm this fare.')); });
     return () => { alive = false; };
@@ -219,6 +229,7 @@ export function TripgicFlightCheckout({ offerId, onClose, onBooked }: { offerId:
         acceptPriceChange: acceptPrice || undefined,
       }, { timeout: 90000 });
       setOrder(res.data);
+      onDetails?.(pax, contact);
       onBooked(res.data);
     } catch (err: any) {
       const data = err?.response?.data;
@@ -232,7 +243,7 @@ export function TripgicFlightCheckout({ offerId, onClose, onBooked }: { offerId:
   };
 
   return (
-    <Modal title={order ? 'Booking' : 'Passenger details'} onClose={onClose}>
+    <Modal title={order ? 'Booking' : heading ?? 'Passenger details'} onClose={onClose}>
       {loadError && <div style={s.error}>{loadError}</div>}
       {!quote && !loadError && <p style={s.muted}>Confirming this fare...</p>}
       {quote && order && <OrderResult order={order} onClose={onClose} />}

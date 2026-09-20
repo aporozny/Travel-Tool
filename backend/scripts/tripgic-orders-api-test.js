@@ -116,6 +116,26 @@ const check = (name, ok, extra = "") => { (ok ? pass++ : fail++); console.log(`$
     check("order status matches cancel outcome", cx.s === 200 ? after.d.status === "cancelled" : after.d.status === "held");
   }
 
+  // ---------- MIX AND MATCH (separate outbound and return flights) ----------
+  console.log("\n### MIX AND MATCH");
+  const outS = await call("POST", "/flights/search", { origin: "SYD", destination: "DPS", departureDate: "2026-11-15", adults: 1 });
+  const backS = await call("POST", "/flights/search", { origin: "DPS", destination: "SYD", departureDate: "2026-11-25", adults: 1 });
+  const outO = (outS.d.offers || []).find((o) => o.provider === "tripgic");
+  const backO = (backS.d.offers || []).find((o) => o.provider === "tripgic");
+  check("one-way searches work in both directions", !!outO && !!backO, `${outO && outO.airline} / ${backO && backO.airline}`);
+  check("each direction is a single slice going the right way", outO.slices.length === 1 && outO.slices[0].originAirport === "SYD" && backO.slices.length === 1 && backO.slices[0].originAirport === "DPS");
+  const qOut = await call("POST", "/tripgic/flights/quote", { offerId: outO.id });
+  const qBack = await call("POST", "/tripgic/flights/quote", { offerId: backO.id });
+  check("both legs quote separately, prices match their cards", qOut.s === 200 && qBack.s === 200 && Math.abs(qOut.d.totalAmount - outO.totalAmount) < 0.011 && Math.abs(qBack.d.totalAmount - backO.totalAmount) < 0.011);
+  check("the two quotes are different", qOut.d.quoteId !== qBack.d.quoteId);
+  const oOut = await call("POST", "/tripgic/flights/orders", { quoteId: qOut.d.quoteId, passengers: [pax], contact });
+  const oBack = await call("POST", "/tripgic/flights/orders", { quoteId: qBack.d.quoteId, passengers: [pax], contact });
+  check("both legs booked as two separate orders", oOut.s === 201 && oBack.s === 201 && oOut.d.id !== oBack.d.id, `${oOut.d.bookingId} / ${oBack.d.bookingId}`);
+  check("the two bookings have different references", oOut.d.bookingId && oBack.d.bookingId && oOut.d.bookingId !== oBack.d.bookingId);
+  const both = await call("GET", "/tripgic/orders");
+  check("both appear in my orders", [oOut.d.id, oBack.d.id].every((id) => both.d.orders.some((x) => x.id === id)));
+  check("returning leg direction preserved in the stored order", (oBack.d.details.slices || [])[0]?.originAirport === "DPS");
+
   // ---------- HOTELS ----------
   console.log("\n### HOTELS");
   const rooms = await call("POST", "/tripgic/hotels/rooms", { hotelId: "H1EA00004#8375388", checkInDate: "2026-11-15", checkOutDate: "2026-11-18", rooms: 1, adults: 2 });

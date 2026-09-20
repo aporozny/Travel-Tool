@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import api from '../services/api.web';
-import { useTripgicBookingEnabled, TripgicFlightCheckout, TripgicOrders } from './TripgicCheckout.web';
-import { Price, CurrencySelect } from '../services/currency.web';
+import { useTripgicBookingEnabled, TripgicFlightCheckout, TripgicOrders, type FlightPax, type Contact } from './TripgicCheckout.web';
+import { Price, CurrencySelect, useCurrency, sumPrices } from '../services/currency.web';
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements, CardNumberElement, CardExpiryElement, CardCvcElement, useStripe, useElements } from '@stripe/react-stripe-js';
 
@@ -360,7 +360,7 @@ interface FlightOrderSummary {
 }
 
 export default function FlightsScreen() {
-  const [tripType, setTripType] = useState<'roundtrip' | 'oneway'>('roundtrip');
+  const [tripType, setTripType] = useState<'roundtrip' | 'oneway' | 'mix'>('roundtrip');
   const [origin, setOrigin] = useState('');
   const [destination, setDestination] = useState('');
   const [departureDate, setDepartureDate] = useState('');
@@ -380,13 +380,27 @@ export default function FlightsScreen() {
   const [tripgicOfferId, setTripgicOfferId] = useState<string | null>(null);
   const [tripgicOrdersKey, setTripgicOrdersKey] = useState(0);
 
+  // Mix and match: the outbound and return flights are searched and chosen
+  // separately (possibly different airlines or providers) and booked as two
+  // separate one-way tickets.
+  const [mixOut, setMixOut] = useState<FlightOffer[] | null>(null);
+  const [mixBack, setMixBack] = useState<FlightOffer[] | null>(null);
+  const [pickedOut, setPickedOut] = useState<FlightOffer | null>(null);
+  const [pickedBack, setPickedBack] = useState<FlightOffer | null>(null);
+  // "Book both": the second flight waits here while the first is being booked.
+  const queueRef = useRef<FlightOffer[]>([]);
+  // Passenger and contact details from the first booking, offered to the second.
+  const carried = useRef<{ passengers: FlightPax[]; contact: Contact } | null>(null);
+  const justBookedTripgic = useRef(false);
+  const { currency: chosenCurrency } = useCurrency();
+
   const loadMyOrders = () => {
     api.get('/flights/orders').then((res) => setMyOrders(res.data.orders || [])).catch(() => {});
   };
 
   useEffect(() => { loadMyOrders(); }, []);
 
-  const handleTripTypeChange = (next: 'roundtrip' | 'oneway') => {
+  const handleTripTypeChange = (next: 'roundtrip' | 'oneway' | 'mix') => {
     setTripType(next);
     if (next === 'oneway') setReturnDate('');
   };
@@ -409,11 +423,28 @@ export default function FlightsScreen() {
       return;
     }
     if (!departureDate) { setError('Pick a departure date.'); return; }
+    if (tripType === 'mix' && !returnDate) { setError('Pick a return date.'); return; }
 
     setLoading(true);
     setError('');
     setSearched(true);
+    queueRef.current = [];
+    carried.current = null;
     try {
+      if (tripType === 'mix') {
+        // Two one-way searches: the outbound, and the return as its own trip.
+        const common = { adults, cabinClass };
+        const [out, back] = await Promise.all([
+          api.post('/flights/search', { origin: origin.toUpperCase(), destination: destination.toUpperCase(), departureDate, ...common }, { timeout: 30000 }),
+          api.post('/flights/search', { origin: destination.toUpperCase(), destination: origin.toUpperCase(), departureDate: returnDate, ...common }, { timeout: 30000 }),
+        ]);
+        setMixOut(out.data.offers || []);
+        setMixBack(back.data.offers || []);
+        setPickedOut(null);
+        setPickedBack(null);
+        setOffers(null);
+        return;
+      }
       // The shared axios client defaults to a 10s timeout, which is too
       // tight for this call specifically -- Duffel's own search response
       // time varies with result-set size and isn't something our backend
@@ -431,6 +462,8 @@ export default function FlightsScreen() {
         cabinClass,
       }, { timeout: 30000 });
       setOffers(res.data.offers || []);
+      setMixOut(null);
+      setMixBack(null);
     } catch (err: any) {
       if (err?.response?.status === 503) {
         setError("Flight search isn't turned on yet.");
@@ -440,10 +473,96 @@ export default function FlightsScreen() {
         setError(err?.response?.data?.message || 'Could not search flights.');
       }
       setOffers(null);
+      setMixOut(null);
+      setMixBack(null);
     } finally {
       setLoading(false);
     }
   };
+
+  const canBook = (o: FlightOffer) =>
+    (o.provider === 'tripgic' && tripgicBookingEnabled) || (o.provider === 'duffel' && (!DUFFEL_IS_TEST_MODE || tripgicBookingEnabled));
+
+  const startBooking = (offer: FlightOffer) => {
+    if (offer.provider === 'tripgic') setTripgicOfferId(offer.id);
+    else { setBooking(null); setCheckoutOffer(offer); }
+  };
+
+  const advanceQueue = () => {
+    const next = queueRef.current.shift();
+    if (next) startBooking(next);
+  };
+
+  const bookBoth = () => {
+    if (!pickedOut || !pickedBack) return;
+    queueRef.current = [pickedBack];
+    startBooking(pickedOut);
+  };
+
+  const legName = (offerId: string | null) =>
+    offerId && offerId === pickedOut?.id ? 'Outbound flight: passenger details' : offerId && offerId === pickedBack?.id ? 'Return flight: passenger details' : undefined;
+
+  // One flight offer card. With `choose`, the action is picking it for a mix-and-match
+  // trip; without, it is the normal Book button for that provider.
+  const renderOffer = (offer: FlightOffer, choose?: { selected: boolean; onChoose: () => void }) => (
+            <div key={offer.id} style={{ ...s.offerCard, ...(choose?.selected ? s.offerSelected : {}) }}>
+      <div style={s.offerHeader}>
+        {offer.airlineLogoUrl && <img src={offer.airlineLogoUrl} alt={offer.airline} style={s.airlineLogo} />}
+        <span style={s.airlineName}>{offer.airline}</span>
+        <span style={s.providerTag}>via {PROVIDER_LABELS[offer.provider]}</span>
+        <Price amount={offer.totalAmount} currency={offer.currency} style={s.price} />
+      </div>
+
+      {offer.slices.map((slice, i) => (
+        <div key={i} style={s.sliceRow}>
+          <div style={s.sliceTimes}>
+            <span style={s.sliceTime}>{formatTime(slice.departingAt)}</span>
+            <span style={s.sliceAirport}>{slice.originAirport}</span>
+          </div>
+          <div style={s.sliceMiddle}>
+            <span style={s.mutedSmall}>{formatDuration(slice.durationMinutes)}</span>
+            <div style={s.sliceLine} />
+            <span style={s.mutedSmall}>{formatStops(slice.stops)}</span>
+          </div>
+          <div style={s.sliceTimes}>
+            <span style={s.sliceTime}>{formatTime(slice.arrivingAt)}</span>
+            <span style={s.sliceAirport}>{slice.destinationAirport}</span>
+          </div>
+        </div>
+      ))}
+
+      {choose ? (
+        <button style={{ ...s.bookBtn, ...(choose.selected ? s.chosenBtn : {}) }} onClick={choose.onChoose}>
+          {choose.selected ? '✓ Chosen' : 'Choose this flight'}
+        </button>
+      ) : (
+        <>
+      {offer.provider === 'tripgic' && tripgicBookingEnabled ? (
+        <>
+          <p style={s.disclosure}>Fare shown includes Drift's booking fee. Test booking -- nobody is charged.</p>
+          <button style={s.bookBtn} onClick={() => setTripgicOfferId(offer.id)}>
+            Book this flight
+          </button>
+        </>
+      ) : offer.provider !== 'duffel' || (DUFFEL_IS_TEST_MODE && !tripgicBookingEnabled) ? (
+        <>
+          <p style={s.disclosure}>Shown for comparison -- booking through this provider isn't available yet.</p>
+          <button style={{ ...s.bookBtn, opacity: 0.5, cursor: 'not-allowed' }} disabled>
+            Booking coming soon
+          </button>
+        </>
+      ) : (
+        <>
+          <p style={s.disclosure}>Fare shown includes Drift's booking fee.</p>
+          <button style={s.bookBtn} onClick={() => { setBooking(null); setCheckoutOffer(offer); }}>
+            Book this flight
+          </button>
+        </>
+      )}
+        </>
+      )}
+    </div>
+  );
 
   return (
     <div style={s.page}>
@@ -468,6 +587,14 @@ export default function FlightsScreen() {
           >
             One way
           </button>
+          <button
+            type="button"
+            style={{ ...s.tripTypeBtn, ...(tripType === 'mix' ? s.tripTypeBtnActive : {}) }}
+            onClick={() => handleTripTypeChange('mix')}
+            title="Choose your outbound and return flights separately, even on different airlines"
+          >
+            Mix and match
+          </button>
         </div>
         <div style={s.searchRow}>
           <div style={s.field}>
@@ -482,7 +609,7 @@ export default function FlightsScreen() {
             <label style={s.label}>Departure</label>
             <input style={s.input} type="date" min={todayIso} value={departureDate} onChange={(e) => handleDepartureDateChange(e.target.value)} />
           </div>
-          {tripType === 'roundtrip' && (
+          {tripType !== 'oneway' && (
             <div style={s.field}>
               <label style={s.label}>Return</label>
               <input style={s.input} type="date" min={departureDate || todayIso} value={returnDate} onChange={(e) => setReturnDate(e.target.value)} />
@@ -522,67 +649,77 @@ export default function FlightsScreen() {
         <p style={s.muted}>No flights found for that search.</p>
       )}
 
+      {mixOut && mixBack && (
+        <>
+          <h2 style={s.legHeading}>1. Choose your outbound flight <span style={s.legRoute}>{origin} → {destination} · {departureDate}</span></h2>
+          <div style={s.results}>
+            {mixOut.length === 0 && <p style={s.muted}>No flights found for this leg.</p>}
+            {mixOut.map((o) => renderOffer(o, { selected: pickedOut?.id === o.id, onChoose: () => setPickedOut(o) }))}
+          </div>
+          <h2 style={s.legHeading}>2. Choose your return flight <span style={s.legRoute}>{destination} → {origin} · {returnDate}</span></h2>
+          <div style={s.results}>
+            {mixBack.length === 0 && <p style={s.muted}>No flights found for this leg.</p>}
+            {mixBack.map((o) => renderOffer(o, { selected: pickedBack?.id === o.id, onChoose: () => setPickedBack(o) }))}
+          </div>
+
+          <div style={s.mixSummary}>
+            <div style={s.mixRow}>
+              <span style={s.mixLabel}>Outbound</span>
+              {pickedOut ? (
+                <span style={s.mixValue}>{pickedOut.airline} · {formatTime(pickedOut.slices[0].departingAt)} → {formatTime(pickedOut.slices[0].arrivingAt)} <Price amount={pickedOut.totalAmount} currency={pickedOut.currency} style={s.mixPrice} /></span>
+              ) : <span style={s.muted}>Not chosen yet</span>}
+            </div>
+            <div style={s.mixRow}>
+              <span style={s.mixLabel}>Return</span>
+              {pickedBack ? (
+                <span style={s.mixValue}>{pickedBack.airline} · {formatTime(pickedBack.slices[0].departingAt)} → {formatTime(pickedBack.slices[0].arrivingAt)} <Price amount={pickedBack.totalAmount} currency={pickedBack.currency} style={s.mixPrice} /></span>
+              ) : <span style={s.muted}>Not chosen yet</span>}
+            </div>
+            {pickedOut && pickedBack && (
+              <>
+                <div style={s.mixTotal}>
+                  Total for both flights: <strong>{sumPrices([{ amount: pickedOut.totalAmount, currency: pickedOut.currency }, { amount: pickedBack.totalAmount, currency: pickedBack.currency }], chosenCurrency) ?? 'see each price above'}</strong>
+                </div>
+                <p style={s.disclosure}>
+                  This is two separate tickets, one for each direction, booked and changed independently. If the airline changes or cancels one, the other is not affected, so check that the dates and times suit you.
+                </p>
+                {canBook(pickedOut) && canBook(pickedBack) ? (
+                  <div style={s.mixActions}>
+                    <button style={s.searchBtn} onClick={bookBoth}>Book both flights</button>
+                    <button style={s.linkBtn} onClick={() => startBooking(pickedOut)}>Book outbound only</button>
+                    <button style={s.linkBtn} onClick={() => startBooking(pickedBack)}>Book return only</button>
+                  </div>
+                ) : (
+                  <div style={s.mixActions}>
+                    {canBook(pickedOut) && <button style={s.linkBtn} onClick={() => startBooking(pickedOut)}>Book outbound only</button>}
+                    {canBook(pickedBack) && <button style={s.linkBtn} onClick={() => startBooking(pickedBack)}>Book return only</button>}
+                    <span style={s.muted}>Booking for {!canBook(pickedOut) && !canBook(pickedBack) ? 'these flights' : 'one of these flights'} isn't available yet.</span>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </>
+      )}
+
       {offers && offers.length > 0 && (
         <div style={s.results}>
-          {offers.map((offer) => (
-            <div key={offer.id} style={s.offerCard}>
-              <div style={s.offerHeader}>
-                {offer.airlineLogoUrl && <img src={offer.airlineLogoUrl} alt={offer.airline} style={s.airlineLogo} />}
-                <span style={s.airlineName}>{offer.airline}</span>
-                <span style={s.providerTag}>via {PROVIDER_LABELS[offer.provider]}</span>
-                <Price amount={offer.totalAmount} currency={offer.currency} style={s.price} />
-              </div>
-
-              {offer.slices.map((slice, i) => (
-                <div key={i} style={s.sliceRow}>
-                  <div style={s.sliceTimes}>
-                    <span style={s.sliceTime}>{formatTime(slice.departingAt)}</span>
-                    <span style={s.sliceAirport}>{slice.originAirport}</span>
-                  </div>
-                  <div style={s.sliceMiddle}>
-                    <span style={s.mutedSmall}>{formatDuration(slice.durationMinutes)}</span>
-                    <div style={s.sliceLine} />
-                    <span style={s.mutedSmall}>{formatStops(slice.stops)}</span>
-                  </div>
-                  <div style={s.sliceTimes}>
-                    <span style={s.sliceTime}>{formatTime(slice.arrivingAt)}</span>
-                    <span style={s.sliceAirport}>{slice.destinationAirport}</span>
-                  </div>
-                </div>
-              ))}
-
-              {offer.provider === 'tripgic' && tripgicBookingEnabled ? (
-                <>
-                  <p style={s.disclosure}>Fare shown includes Drift's booking fee. Test booking -- nobody is charged.</p>
-                  <button style={s.bookBtn} onClick={() => setTripgicOfferId(offer.id)}>
-                    Book this flight
-                  </button>
-                </>
-              ) : offer.provider !== 'duffel' || (DUFFEL_IS_TEST_MODE && !tripgicBookingEnabled) ? (
-                <>
-                  <p style={s.disclosure}>Shown for comparison -- booking through this provider isn't available yet.</p>
-                  <button style={{ ...s.bookBtn, opacity: 0.5, cursor: 'not-allowed' }} disabled>
-                    Booking coming soon
-                  </button>
-                </>
-              ) : (
-                <>
-                  <p style={s.disclosure}>Fare shown includes Drift's booking fee.</p>
-                  <button style={s.bookBtn} onClick={() => { setBooking(null); setCheckoutOffer(offer); }}>
-                    Book this flight
-                  </button>
-                </>
-              )}
-            </div>
-          ))}
+          {offers.map((offer) => renderOffer(offer))}
         </div>
       )}
 
       {tripgicOfferId && (
         <TripgicFlightCheckout
           offerId={tripgicOfferId}
-          onClose={() => setTripgicOfferId(null)}
-          onBooked={() => setTripgicOrdersKey((k) => k + 1)}
+          heading={legName(tripgicOfferId)}
+          prefill={carried.current}
+          onDetails={(passengers, contact) => { carried.current = { passengers, contact }; }}
+          onClose={() => {
+            setTripgicOfferId(null);
+            // Booked and closed: move on to the second flight if there is one. Closed without booking: drop it.
+            if (justBookedTripgic.current) { justBookedTripgic.current = false; advanceQueue(); } else queueRef.current = [];
+          }}
+          onBooked={() => { setTripgicOrdersKey((k) => k + 1); justBookedTripgic.current = true; }}
         />
       )}
 
@@ -591,8 +728,8 @@ export default function FlightsScreen() {
       {checkoutOffer && (
         <CheckoutModal
           offer={checkoutOffer}
-          onClose={() => setCheckoutOffer(null)}
-          onBooked={(b) => { setBooking(b); setCheckoutOffer(null); loadMyOrders(); }}
+          onClose={() => { setCheckoutOffer(null); queueRef.current = []; }}
+          onBooked={(b) => { setBooking(b); setCheckoutOffer(null); loadMyOrders(); advanceQueue(); }}
         />
       )}
 
@@ -636,6 +773,18 @@ const s: Record<string, React.CSSProperties> = {
   searchBtn: { padding: '11px 22px', background: C.gold, color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: 'pointer' },
   error: { background: '#ffebee', color: '#c62828', padding: '10px 14px', borderRadius: 8, marginBottom: 16, fontSize: 13 },
   muted: { color: C.muted, fontSize: 14 },
+  legHeading: { fontSize: 18, fontWeight: 700, color: C.text, margin: '26px 0 12px', fontFamily: "'DM Serif Display', serif" },
+  legRoute: { fontSize: 13, fontWeight: 400, color: C.muted, fontFamily: 'inherit', marginLeft: 8 },
+  offerSelected: { borderColor: C.gold, boxShadow: `0 0 0 2px ${C.goldLight}` },
+  chosenBtn: { background: C.goldLight, color: C.goldDark, border: `1.5px solid ${C.gold}` },
+  mixSummary: { position: 'sticky' as const, bottom: 12, background: C.white, border: `1.5px solid ${C.gold}`, borderRadius: 16, padding: 18, margin: '24px 0', boxShadow: '0 6px 24px rgba(0,0,0,0.08)' },
+  mixRow: { display: 'flex', gap: 14, alignItems: 'baseline', padding: '5px 0', fontSize: 14 },
+  mixLabel: { width: 74, fontSize: 11, fontWeight: 700, color: C.goldDark, textTransform: 'uppercase' as const, letterSpacing: '0.4px' },
+  mixValue: { flex: 1, display: 'flex', gap: 12, alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' as const },
+  mixPrice: { fontWeight: 700, color: C.goldDark },
+  mixTotal: { borderTop: `1px solid ${C.border}`, marginTop: 8, paddingTop: 10, fontSize: 15, color: C.text },
+  mixActions: { display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' as const, marginTop: 8 },
+  linkBtn: { background: 'none', border: 'none', color: C.goldDark, fontSize: 13, cursor: 'pointer', textDecoration: 'underline', padding: 0 },
   mutedSmall: { color: C.muted, fontSize: 11 },
   results: { display: 'flex', flexDirection: 'column' as const, gap: 14 },
   offerCard: { background: C.white, border: `1px solid ${C.border}`, borderRadius: 14, padding: 18 },
