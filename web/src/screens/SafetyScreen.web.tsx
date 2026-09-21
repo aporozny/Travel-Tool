@@ -120,7 +120,8 @@ export default function SafetyScreen() {
       });
       const { latitude, longitude } = position.coords;
       const { data } = await api.post('/safety/location', { latitude, longitude });
-      setCurrentLocation(data);
+      // The server answers with only { id, recorded_at }; the coordinates shown come from what was just sent.
+      setCurrentLocation({ ...data, latitude, longitude });
       alert(`Location saved: ${latitude.toFixed(4)}, ${longitude.toFixed(4)}`);
       const updated = await api.get('/safety/location/history?limit=10');
       setLocationHistory(updated.data || []);
@@ -171,8 +172,9 @@ export default function SafetyScreen() {
       setTrips(prev => [res.data, ...prev]);
       setShowTripForm(false);
       setTripDest(''); setTripRegion(''); setTripStart(''); setTripEnd(''); setTripNotes('');
-    } catch {
-      alert('Could not save trip. Please try again.');
+    } catch (e: any) {
+      const d = e?.response?.data;
+      alert(d?.errors?.[0]?.message || d?.message || 'Could not save trip. Please try again.');
     } finally {
       setSavingTrip(false);
     }

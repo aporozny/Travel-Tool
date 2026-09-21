@@ -6,6 +6,8 @@ import { authenticate, AuthenticatedRequest } from '../middleware/authenticate';
 import { sendSOSAlert, sendReviewerAlert } from '../services/notifications';
 import { getLatestConsent, recordConsent } from '../services/consent';
 import { upsertPresence, removePresence } from '../utils/geoPresence';
+import { isTripDate, toTripDate } from '../utils/tripDates';
+import { sendAllClear } from '../services/safetyMonitor';
 
 export const safetyRouter = Router();
 
@@ -339,13 +341,20 @@ safetyRouter.get('/verification/stream', authenticate, (req: AuthenticatedReques
 
 // ─── PILLAR 2: TRIP CHECK-IN ──────────────────────────────────────────────────
 
+// Dates are optional and may be "2026-11-01" (what the form sends) or a full
+// ISO datetime. They used to have to be full datetimes, so planning a trip from
+// the Safety screen failed every time. Region and the public flag the form
+// sends are stored instead of silently dropped.
+const tripDate = z.string().refine(isTripDate, 'Use a date like 2026-11-01').transform((v) => toTripDate(v) as string);
 const tripSchema = z.object({
-  destination: z.string().min(1),
-  start_date: z.string().datetime(),
-  end_date: z.string().datetime(),
+  destination: z.string().trim().min(1),
+  region: z.string().trim().max(100).optional(),
+  start_date: tripDate.optional(),
+  end_date: tripDate.optional(),
+  is_public: z.boolean().optional(),
   checkinIntervalHours: z.number().int().min(1).max(168).default(24),
   notes: z.string().max(500).optional(),
-});
+}).refine((t) => !t.start_date || !t.end_date || t.end_date >= t.start_date, { message: 'End date must not be before the start date', path: ['end_date'] });
 
 const checkinSchema = z.object({
   tripId: z.string().uuid(),
@@ -363,12 +372,12 @@ safetyRouter.post('/trips', authenticate, async (req: AuthenticatedRequest, res:
 
     const result = await pool.query(
       `INSERT INTO member_trips
-         (user_id, destination, start_date, end_date,
-          checkin_interval_hours, notes, safety_status)
-       VALUES ($6, $1, $2, $3, $4, $5, 'planned')
-       RETURNING id, destination, start_date, end_date, safety_status`,
-      [body.destination, body.start_date, body.end_date,
-       body.checkinIntervalHours, body.notes ?? null, req.user!.id]
+         (user_id, destination, region, start_date, end_date,
+          checkin_interval_hours, notes, is_public, safety_status)
+       VALUES ($7, $1, $8, $2, $3, $4, $5, COALESCE($6, true), 'planned')
+       RETURNING id, destination, region, start_date, end_date, safety_status`,
+      [body.destination, body.start_date ?? null, body.end_date ?? null,
+       body.checkinIntervalHours, body.notes ?? null, body.is_public ?? null, req.user!.id, body.region ?? null]
     );
     return res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -426,8 +435,8 @@ safetyRouter.post('/trips/checkin', authenticate, async (req: AuthenticatedReque
     // Ownership + status check - only the trip's own owner can check in,
     // and only while the trip is active or overdue (not planned/completed)
     const trip = await pool.query(
-      `SELECT id, checkin_interval_hours FROM member_trips
-       WHERE id = $1 AND user_id = $2 AND safety_status IN ('active', 'overdue')`,
+      `SELECT id, user_id, destination, safety_status, checkin_interval_hours FROM member_trips
+       WHERE id = $1 AND user_id = $2 AND safety_status IN ('active', 'overdue', 'escalated')`,
       [body.tripId, req.user!.id]
     );
     if (!trip.rows.length) return res.status(404).json({ message: 'Active trip not found' });
@@ -456,11 +465,17 @@ safetyRouter.post('/trips/checkin', authenticate, async (req: AuthenticatedReque
       `UPDATE member_trips SET
         safety_status    = 'active',
         last_checkin_at  = NOW(),
-        next_checkin_due = NOW() + (checkin_interval_hours * INTERVAL '1 hour')
+        next_checkin_due = NOW() + (checkin_interval_hours * INTERVAL '1 hour'),
+        overdue_since = NULL, overdue_alerted_at = NULL, escalation_flagged_at = NULL, escalated_at = NULL
        WHERE id = $1
        RETURNING next_checkin_due`,
       [body.tripId]
     );
+
+    // Contacts who were told this traveller had gone quiet are told they have checked in.
+    if (trip.rows[0].safety_status === 'escalated') {
+      sendAllClear(trip.rows[0]).catch((err) => console.error('All-clear to contacts failed:', err));
+    }
 
     return res.status(201).json({
       checkinId: checkin.rows[0].id,
@@ -481,7 +496,7 @@ safetyRouter.post('/trips/:id/complete', authenticate, async (req: Authenticated
       `UPDATE member_trips mt SET safety_status = 'completed'
        FROM travelers t
        WHERE mt.id = $1 AND mt.user_id = $2
-         AND mt.safety_status IN ('active','overdue')
+         AND mt.safety_status IN ('active','overdue','escalated')
        RETURNING mt.id`,
       [req.params.id, req.user!.id]
     );

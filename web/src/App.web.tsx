@@ -6,6 +6,7 @@ import AppShell from './screens/AppShell.web';
 import OnboardingScreen from './screens/OnboardingScreen.web';
 import api from './services/api.web';
 import AdminWaitlist from './screens/AdminWaitlist.web';
+import ErrorBoundary from './components/ErrorBoundary.web';
 
 function AdminWrapper() {
   if (window.location.pathname.startsWith('/admin')) {
@@ -14,7 +15,13 @@ function AdminWrapper() {
   return <AppInner />;
 }
 
-export default AdminWrapper;
+export default function Root() {
+  return (
+    <ErrorBoundary>
+      <AdminWrapper />
+    </ErrorBoundary>
+  );
+}
 
 function AppInner() {
   const { isAuthenticated, user } = useSelector((s: RootState) => s.auth);

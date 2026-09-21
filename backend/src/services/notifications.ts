@@ -64,7 +64,7 @@ export async function sendEmail(to: string, subject: string, text: string, optio
   }
 }
 
-async function sendSms(to: string, body: string): Promise<boolean> {
+export async function sendSms(to: string, body: string): Promise<boolean> {
   if (!process.env.MOBILEMESSAGE_API_USERNAME || !process.env.MOBILEMESSAGE_API_PASSWORD || !process.env.MOBILEMESSAGE_SENDER) {
     console.log('Mobile Message credentials not set - skipping SMS to', to);
     return false;

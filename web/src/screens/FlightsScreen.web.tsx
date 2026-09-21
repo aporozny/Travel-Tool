@@ -230,7 +230,9 @@ function CheckoutModal({
     setPassengers((prev) => prev.map((p, i) => (i === idx ? { ...p, [field]: value } : p)));
   };
 
-  const passengersValid = passengers.every((p) => p.givenName && p.familyName && p.bornOn && p.email && p.phoneNumber);
+  // Checked here, before the card is charged: the server rejects a malformed email
+  // or a phone number that is not international (+61...) only AFTER payment.
+  const passengersValid = passengers.every((p) => p.givenName && p.familyName && p.bornOn && /^\S+@\S+\.\S+$/.test(p.email) && /^\+\d{7,15}$/.test(p.phoneNumber.replace(/[\s-]/g, '')));
 
   const handleContinueToPayment = async () => {
     setError('');
@@ -483,14 +485,14 @@ export default function FlightsScreen() {
   const canBook = (o: FlightOffer) =>
     (o.provider === 'tripgic' && tripgicBookingEnabled) || (o.provider === 'duffel' && (!DUFFEL_IS_TEST_MODE || tripgicBookingEnabled));
 
-  const startBooking = (offer: FlightOffer) => {
+  const startBooking = (offer: FlightOffer, keepConfirmation = false) => {
     if (offer.provider === 'tripgic') setTripgicOfferId(offer.id);
-    else { setBooking(null); setCheckoutOffer(offer); }
+    else { if (!keepConfirmation) setBooking(null); setCheckoutOffer(offer); }
   };
 
   const advanceQueue = () => {
     const next = queueRef.current.shift();
-    if (next) startBooking(next);
+    if (next) startBooking(next, true);
   };
 
   const bookBoth = () => {
@@ -710,6 +712,7 @@ export default function FlightsScreen() {
 
       {tripgicOfferId && (
         <TripgicFlightCheckout
+          key={tripgicOfferId}
           offerId={tripgicOfferId}
           heading={legName(tripgicOfferId)}
           prefill={carried.current}
@@ -727,6 +730,7 @@ export default function FlightsScreen() {
 
       {checkoutOffer && (
         <CheckoutModal
+          key={checkoutOffer.id}
           offer={checkoutOffer}
           onClose={() => { setCheckoutOffer(null); queueRef.current = []; }}
           onBooked={(b) => { setBooking(b); setCheckoutOffer(null); loadMyOrders(); advanceQueue(); }}
