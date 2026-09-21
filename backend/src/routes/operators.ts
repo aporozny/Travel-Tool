@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 import { z } from 'zod';
 import { pool } from '../utils/db';
 import { authenticate, AuthenticatedRequest } from '../middleware/authenticate';
+import { submitClaim, listOwnClaims, listPendingClaims, reviewClaim, ClaimError } from '../services/listingClaims';
 
 export const operatorsRouter = Router();
 
@@ -102,10 +103,9 @@ operatorsRouter.get('/search-places', async (req: AuthenticatedRequest, res: Res
          pc.latitude,
          pc.longitude,
          pc.operator_id,
-         CASE WHEN pc.operator_id IS NOT NULL THEN true ELSE false END AS is_claimed,
-         CASE WHEN lc.id IS NOT NULL THEN true ELSE false END AS has_pending_claim
+         (pc.operator_id IS NOT NULL OR pc.is_claimed) AS is_claimed,
+         EXISTS (SELECT 1 FROM listing_claims lc WHERE lc.place_id = pc.id AND lc.status = 'pending') AS has_pending_claim
        FROM places_cache pc
-       LEFT JOIN listing_claims lc ON lc.place_cache_id = pc.id AND lc.status = 'pending'
        WHERE pc.name ILIKE $1
        ${region ? 'AND pc.region ILIKE $2' : ''}
        ORDER BY pc.rating DESC NULLS LAST
@@ -130,54 +130,23 @@ operatorsRouter.post('/claims', authenticate, async (req: AuthenticatedRequest, 
 
     const body = claimSchema.parse(req.body);
 
-    // Check place exists
-    const place = await pool.query(
-      `SELECT id, name, operator_id FROM places_cache WHERE id = $1`,
-      [body.place_cache_id]
-    );
-    if (!place.rows.length) {
-      return res.status(404).json({ message: 'Place not found' });
-    }
-    if (place.rows[0].operator_id) {
-      return res.status(409).json({ message: 'This listing has already been claimed' });
-    }
-
-    // Check no pending claim from this operator
-    const existing = await pool.query(
-      `SELECT id FROM listing_claims
-       WHERE place_cache_id = $1 AND operator_id = (
-         SELECT id FROM operators WHERE user_id = $2
-       ) AND status = 'pending'`,
-      [body.place_cache_id, req.user!.id]
-    );
-    if (existing.rows.length) {
-      return res.status(409).json({ message: 'You already have a pending claim for this listing' });
-    }
-
-    // Get operator id
-    const operator = await pool.query(
-      `SELECT id FROM operators WHERE user_id = $1`,
-      [req.user!.id]
-    );
-    if (!operator.rows.length) {
-      return res.status(404).json({ message: 'Operator profile not found' });
-    }
-
-    const result = await pool.query(
-      `INSERT INTO listing_claims (place_cache_id, operator_id, status, evidence)
-       VALUES ($1, $2, 'pending', $3)
-       RETURNING id, status, created_at`,
-      [body.place_cache_id, operator.rows[0].id, body.evidence]
-    );
+    const claim = await submitClaim({
+      userId: req.user!.id,
+      placeId: (body.place_id ?? body.place_cache_id)!,
+      evidence: body.evidence,
+      contactEmail: body.contact_email,
+      contactPhone: body.contact_phone,
+    });
 
     return res.status(201).json({
-      claimId: result.rows[0].id,
+      claimId: claim.claimId,
       status: 'pending',
-      placeName: place.rows[0].name,
+      placeName: claim.placeName,
       message: 'Claim submitted. Our team will review within 48 hours.',
     });
   } catch (err) {
     if (err instanceof z.ZodError) return res.status(400).json({ message: 'Validation error', errors: err.errors });
+    if (err instanceof ClaimError) return res.status(err.status).json({ message: err.message });
     console.error(err);
     return res.status(500).json({ message: 'Internal server error' });
   }
@@ -190,27 +159,19 @@ operatorsRouter.get('/claims', authenticate, async (req: AuthenticatedRequest, r
     if (req.user!.role !== 'operator') {
       return res.status(403).json({ message: 'Operators only' });
     }
+    return res.json(await listOwnClaims(req.user!.id));
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: 'Internal server error' });
+  }
+});
 
-    const result = await pool.query(
-      `SELECT
-         lc.id,
-         lc.status,
-         lc.evidence,
-         lc.created_at,
-         lc.reviewed_at,
-         pc.name AS place_name,
-         pc.address,
-         pc.category,
-         pc.region
-       FROM listing_claims lc
-       JOIN places_cache pc ON pc.id = lc.place_cache_id
-       JOIN operators o ON o.id = lc.operator_id
-       WHERE o.user_id = $1
-       ORDER BY lc.created_at DESC`,
-      [req.user!.id]
-    );
-
-    return res.json(result.rows);
+// GET /api/v1/operators/claims/queue — Admin moderation queue
+// (declared before /claims/:id so "queue" is never read as a claim id)
+operatorsRouter.get('/claims/queue', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (req.user!.role !== 'admin') return res.status(403).json({ message: 'Admin only' });
+    return res.json(await listPendingClaims());
   } catch (err) {
     console.error(err);
     return res.status(500).json({ message: 'Internal server error' });
@@ -224,114 +185,20 @@ operatorsRouter.patch('/claims/:id', authenticate, async (req: AuthenticatedRequ
       return res.status(403).json({ message: 'Admin only' });
     }
 
-    const { status } = req.body;
-    if (!['approved', 'rejected'].includes(status)) {
+    const status = req.body?.status;
+    if (status !== 'approved' && status !== 'rejected') {
       return res.status(400).json({ message: 'Status must be approved or rejected' });
     }
 
-    const claim = await pool.query(
-      `SELECT lc.*, pc.name AS place_name
-       FROM listing_claims lc
-       JOIN places_cache pc ON pc.id = lc.place_cache_id
-       WHERE lc.id = $1`,
-      [req.params.id]
-    );
-    if (!claim.rows.length) return res.status(404).json({ message: 'Claim not found' });
-    if (claim.rows[0].status !== 'pending') {
-      return res.status(409).json({ message: 'Claim already reviewed' });
-    }
-
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-
-      // Update claim status
-      await client.query(
-        `UPDATE listing_claims SET status = $1, reviewed_by = $2, reviewed_at = NOW()
-         WHERE id = $3`,
-        [status, req.user!.id, req.params.id]
-      );
-
-      if (status === 'approved') {
-        // Link the place to the operator
-        await client.query(
-          `UPDATE places_cache SET operator_id = $1 WHERE id = $2`,
-          [claim.rows[0].operator_id, claim.rows[0].place_cache_id]
-        );
-
-        // Mark operator as verified
-        await client.query(
-          `UPDATE operators SET is_verified = true WHERE id = $1`,
-          [claim.rows[0].operator_id]
-        );
-
-        // Initialise operator trust score
-        await client.query(
-          `INSERT INTO operator_trust_scores (operator_id, score_identity)
-           VALUES ($1, 100)
-           ON CONFLICT (operator_id) DO UPDATE SET score_identity = 100`,
-          [claim.rows[0].operator_id]
-        );
-
-        // Recompute trust score
-        await client.query(
-          `SELECT compute_operator_trust_score($1)`,
-          [claim.rows[0].operator_id]
-        );
-      }
-
-      await client.query('COMMIT');
-    } catch (err) {
-      await client.query('ROLLBACK');
-      throw err;
-    } finally {
-      client.release();
-    }
-
-    return res.json({
-      success: true,
-      status,
-      placeName: claim.rows[0].place_name,
-    });
+    const result = await reviewClaim(req.params.id, req.user!.id, status);
+    return res.json({ success: true, status: result.status, placeName: result.placeName });
   } catch (err) {
+    if (err instanceof ClaimError) return res.status(err.status).json({ message: err.message });
     console.error(err);
     return res.status(500).json({ message: 'Internal server error' });
   }
 });
 
-// GET /api/v1/operators/claims/queue — Admin moderation queue
-operatorsRouter.get('/claims/queue', authenticate, async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    if (req.user!.role !== 'admin') return res.status(403).json({ message: 'Admin only' });
-
-    const result = await pool.query(
-      `SELECT
-         lc.id,
-         lc.status,
-         lc.evidence,
-         lc.created_at,
-         pc.name AS place_name,
-         pc.address,
-         pc.category,
-         pc.region,
-         pc.rating,
-         o.business_name,
-         o.phone AS operator_phone,
-         u.email AS operator_email
-       FROM listing_claims lc
-       JOIN places_cache pc ON pc.id = lc.place_cache_id
-       JOIN operators o ON o.id = lc.operator_id
-       JOIN users u ON u.id = o.user_id
-       WHERE lc.status = 'pending'
-       ORDER BY lc.created_at ASC`
-    );
-
-    return res.json(result.rows);
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ message: 'Internal server error' });
-  }
-});
 // GET /api/v1/operators/:id
 // Public - get single operator
 operatorsRouter.get('/:id', async (req: AuthenticatedRequest, res: Response) => {
@@ -466,14 +333,14 @@ operatorsRouter.patch('/:id', authenticate, async (req: AuthenticatedRequest, re
   }
 });
 // =============================================================================
-// OPERATOR CLAIM FLOW
-// Append to /home/travel-tool/backend/src/routes/operators.ts
+// OPERATOR CLAIM FLOW: request body for POST /operators/claims.
+// The listing id may be sent as place_cache_id (original name) or place_id.
 // =============================================================================
 
 const claimSchema = z.object({
-  place_cache_id: z.string().uuid(),
+  place_cache_id: z.string().uuid().optional(),
+  place_id: z.string().uuid().optional(),
   evidence: z.string().min(10).max(2000),
   contact_email: z.string().email(),
   contact_phone: z.string().max(20).optional(),
-});
-
+}).refine((v) => v.place_id || v.place_cache_id, { message: 'place_id is required', path: ['place_id'] });

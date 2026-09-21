@@ -91,12 +91,14 @@ export default function AppShell() {
       case 'flights':   return <FlightsScreen />;
       case 'stays':     return <StaysScreen />;
       case 'explore':   return <ExploreScreen onSelectOperator={(op: any) => setDetail({ type: 'operator', data: op })} detail={detail} onClearDetail={() => setDetail(null)} />;
-      case 'bookings':  return <BookingsScreen />;
+      // An operator's bookings (with Confirm / Decline / Mark completed) live on the dashboard's Bookings tab.
+      // (the keys make React start a fresh screen on the right tab when switching between the two menu items)
+      case 'bookings':  return isOperator ? <DashboardScreen key="bookings" initialTab="bookings" /> : <BookingsScreen />;
       case 'safety':    return <SafetyScreen />;
       case 'profile':   return <ProfileScreen />;
       case 'members':   return <MembersScreen />;
       case 'messages':  return <MessagesScreen />;
-      case 'dashboard': return <DashboardScreen />;
+      case 'dashboard': return <DashboardScreen key="dashboard" />;
       default:          return null;
     }
   };
@@ -165,7 +167,7 @@ export default function AppShell() {
             </button>
           ))}
           {isAdmin && (
-            <button style={styles.navItem} onClick={() => { window.open('/admin.html', '_blank'); setDrawerOpen(false); }}>
+            <button style={styles.navItem} onClick={() => { window.open('/admin', '_blank'); setDrawerOpen(false); }}>
               <span style={{ ...styles.navIcon, color: C.muted }}>⚙</span>
               <span style={{ color: C.muted }}>Admin</span>
             </button>

@@ -36,6 +36,7 @@ import { voiceAgentRouter } from './routes/voiceAgent';
 import { errorHandler } from './middleware/errorHandler';
 import { notFound } from './middleware/notFound';
 import { authRateLimit, searchRateLimit, apiRateLimit } from './middleware/rateLimit';
+import { authenticate, AuthenticatedRequest } from './middleware/authenticate';
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -59,6 +60,12 @@ app.use('/api/', apiRateLimit);
 
 // Routes
 app.use('/health', healthRouter);
+// Who is signed in. Only the token survives a page reload, so the web app asks this on
+// every load to get the user's role back (operators and admins lost their menus without
+// it). Mounted before the auth router so it is not counted by authRateLimit's 10-failures rule.
+app.get('/api/v1/auth/me', authenticate, (req: AuthenticatedRequest, res) => {
+  res.json({ id: req.user!.id, email: req.user!.email, role: req.user!.role });
+});
 app.use('/api/v1/auth', authRateLimit, authRouter);
 app.use('/api/v1/travelers', travelersRouter);
 app.use('/api/v1/operators', operatorsRouter);

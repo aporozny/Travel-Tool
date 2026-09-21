@@ -45,3 +45,20 @@ Note: the reviewer *email* will not arrive while SendGrid is out of credits; the
 - **Photo-only posts** now work (the database required text).
 - **Attached photo URLs** must now be ones our own upload created (anything else is a 400).
 - Test: `backend/scripts/community-fixes-api-test.js`, 38 checks, all passing.
+
+
+## Operator side, fixed 21 Sep (second pass)
+
+| Defect | What was wrong | Fix |
+|---|---|---|
+| D-D-1 Operator dashboard never loads | `/dashboard/bookings` joined a table that does not exist (`traveler_preferences`), `/dashboard/reviews` used the missing `reviews.title`; `Promise.all` then blanked the whole screen | Bookings joins `member_preferences`; reviews fixed by migration 043 and now `LEFT JOIN`s bookings; the screen uses `allSettled`, shows what loaded, says what did not, and has a Try again button |
+| D-D-7 Reviews API broken | `reviews.title` missing | Migration 043 (first pass) |
+| D-D-8, D-B-1, D-B-2 Listing claims (submit, list, admin queue, approve) | `listing_claims` lacked `operator_id`, `evidence`, contact and review columns; code used `place_cache_id` where the column is `place_id`; approval called a database function that does not exist and never set `is_claimed`; `search.ts` had a second, different copy that wrote a non-existent `claimed_at` | Migration 044 adds the columns, a status check and a unique index (one pending claim per operator per listing). One shared service (`services/listingClaims.ts`) now backs both route files. Approval marks the listing claimed, verifies the operator, sets the trust score (identity 100, composite 40, tier "verified") and rejects rivals still waiting on the same listing. The two already-verified operators were given trust rows |
+| After a page reload `user` is null (operators and admins lose their menus; a traveller mid-onboarding skips onboarding) | Only the token was restored, never the user | New `GET /auth/me` (mounted before the sign-in rate limiter so reloads never count against it); `App.web.tsx` waits for it, signs out only on 401/403, and shows a Try again screen if the server cannot be reached |
+| D-D-5 Admin link is a 404 | nginx redirected `/admin` to `/admin.html`, which the "html files must exist" rule then answered with 404 | nginx serves the app for `/admin` and `/admin.html` (the app already draws the admin screen for any `/admin` path); sidebar link now opens `/admin` |
+| D-D-28 Operator Bookings tab shows blanks | The screen printed `business_name`, which the operator query does not return, and had no actions | The operator's Bookings menu item opens the dashboard's Bookings tab (traveller name and email, Confirm, Decline, Mark completed) |
+| D-D-42 Dashboard status changes swallow errors | `console.error` only | A failed Confirm or Decline shows the server's message |
+
+Tests: `backend/scripts/operator-fixes-api-test.js` (59 checks, all passing, cleans up after itself). Also checked in a real browser on the live site: a reload keeps the operator and admin menus, the operator Bookings tab lists the booking and Confirm works, `/admin` loads.
+
+Found by the browser check and fixed before finishing: the operator's Bookings item first stayed on the Overview tab because React reused the same screen (fixed with a `key`).

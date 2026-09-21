@@ -8,45 +8,77 @@ const STATUS_STYLES: Record<string, React.CSSProperties> = {
   completed: { background: '#E3F2FD', color: '#1565C0' },
 };
 
-export default function DashboardScreen() {
+export default function DashboardScreen({ initialTab = 'overview' }: { initialTab?: 'overview' | 'bookings' | 'reviews' }) {
   const [overview, setOverview] = useState<any>(null);
   const [bookings, setBookings] = useState<any[]>([]);
   const [reviews, setReviews] = useState<any[]>([]);
   const [analytics, setAnalytics] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<'overview' | 'bookings' | 'reviews'>('overview');
+  const [tab, setTab] = useState<'overview' | 'bookings' | 'reviews'>(initialTab);
+  // What could not be loaded, in plain words. The sections that did load still show.
+  const [problems, setProblems] = useState<string[]>([]);
+  const [noProfile, setNoProfile] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
-    Promise.all([
+    let cancelled = false;
+    setLoading(true);
+    // allSettled, not all: one failing section must not blank the whole dashboard.
+    Promise.allSettled([
       api.get('/dashboard/overview'),
       api.get('/dashboard/bookings'),
       api.get('/dashboard/reviews'),
       api.get('/dashboard/analytics'),
     ]).then(([o, b, r, a]) => {
-      setOverview(o.data);
-      setBookings(b.data);
-      setReviews(r.data);
-      setAnalytics(a.data);
-    }).catch(console.error)
-      .finally(() => setLoading(false));
-  }, []);
+      if (cancelled) return;
+      const failed: string[] = [];
+      if (o.status === 'fulfilled') { setOverview(o.value.data); setNoProfile(false); }
+      else if ((o.reason as any)?.response?.status === 404) { setNoProfile(true); }
+      else failed.push('your business summary');
+      if (b.status === 'fulfilled') setBookings(b.value.data); else failed.push('your bookings');
+      if (r.status === 'fulfilled') setReviews(r.value.data); else failed.push('your reviews');
+      if (a.status === 'fulfilled') setAnalytics(a.value.data); else failed.push('the activity chart');
+      setProblems(failed);
+      setLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [reloadKey]);
 
   const updateBookingStatus = async (id: string, status: string) => {
+    setActionError(null);
     try {
       await api.patch(`/bookings/${id}/status`, { status });
       setBookings(prev => prev.map(b => b.id === id ? { ...b, status } : b));
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      setActionError(err?.response?.data?.message || 'That change did not save. Please try again.');
     }
   };
 
   const fmt = (d: string) => new Date(d).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
 
   if (loading) return <div style={styles.loading}>Loading dashboard...</div>;
-  if (!overview) return <div style={styles.loading}>No operator profile found. Create your listing first.</div>;
+  if (noProfile) return <div style={styles.loading}>No operator profile found. Create your listing first.</div>;
+  if (!overview) {
+    return (
+      <div style={styles.loading}>
+        <p>We couldn't load your dashboard just now.</p>
+        <button style={styles.confirmBtn} onClick={() => setReloadKey(k => k + 1)}>Try again</button>
+      </div>
+    );
+  }
 
   return (
     <div style={styles.container}>
+      {problems.length > 0 && (
+        <div style={{ background: '#FFF8E1', color: '#8a5a00', border: '1px solid #f0d9a0', borderRadius: 12, padding: '10px 14px', marginBottom: 16, fontSize: 14 }}>
+          We couldn't load {problems.join(', ')}. The rest is shown.{' '}
+          <button style={{ background: 'none', border: 'none', color: '#8a5a00', textDecoration: 'underline', cursor: 'pointer', padding: 0 }} onClick={() => setReloadKey(k => k + 1)}>Try again</button>
+        </div>
+      )}
+      {actionError && (
+        <div style={{ background: '#FFEBEE', color: '#C62828', borderRadius: 12, padding: '10px 14px', marginBottom: 16, fontSize: 14 }}>{actionError}</div>
+      )}
       <div style={styles.headerRow}>
         <div>
           <h2 style={styles.title}>{overview.business_name}</h2>

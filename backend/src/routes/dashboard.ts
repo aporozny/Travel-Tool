@@ -69,13 +69,16 @@ dashboardRouter.get('/bookings', async (req: AuthenticatedRequest, res: Response
       JOIN operators o ON o.id = b.operator_id
       JOIN travelers t ON t.id = b.traveler_id
       JOIN users u ON u.id = t.user_id
-      LEFT JOIN traveler_preferences tp ON tp.traveler_id = t.id
+      LEFT JOIN member_preferences tp ON tp.traveler_id = t.id
       WHERE o.user_id = $1
     `;
 
     const params: any[] = [req.user!.id];
 
-    if (status) {
+    if (status !== undefined) {
+      if (typeof status !== 'string' || !['pending', 'confirmed', 'completed', 'cancelled'].includes(status)) {
+        return res.status(400).json({ message: 'Invalid status filter' });
+      }
       query += ` AND b.status = $2`;
       params.push(status);
     }
@@ -102,7 +105,7 @@ dashboardRouter.get('/reviews', async (req: AuthenticatedRequest, res: Response)
        FROM reviews r
        JOIN operators o ON o.id = r.operator_id
        JOIN travelers t ON t.id = r.traveler_id
-       JOIN bookings b ON b.id = r.booking_id
+       LEFT JOIN bookings b ON b.id = r.booking_id
        WHERE o.user_id = $1 AND r.is_published = true
        ORDER BY r.created_at DESC`,
       [req.user!.id]
@@ -125,7 +128,7 @@ dashboardRouter.get('/claims', async (req: AuthenticatedRequest, res: Response) 
          pc.name, pc.category, pc.address, pc.region, pc.rating, pc.review_count
        FROM listing_claims lc
        JOIN operators o ON o.id = lc.operator_id
-       JOIN places_cache pc ON pc.id = lc.place_cache_id
+       JOIN places_cache pc ON pc.id = lc.place_id
        WHERE o.user_id = $1
        ORDER BY lc.created_at DESC`,
       [req.user!.id]
