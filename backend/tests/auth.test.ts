@@ -8,6 +8,9 @@ const testEmail = `test_${Date.now()}@example.com`;
 const testPassword = 'TestPass2026!';
 
 afterAll(async () => {
+  // consent_records is an append-only log with a foreign key to users, so this test's rows go first.
+  // (The catch is for CI, whose older schema has no such table.)
+  await pool.query("DELETE FROM consent_records WHERE user_id IN (SELECT id FROM users WHERE email LIKE 'test_%@example.com')").catch(() => {});
   await pool.query('DELETE FROM users WHERE email LIKE $1', ['test_%@example.com']);
   await pool.end();
   await redis.quit();

@@ -12,6 +12,7 @@ import {
 	listTripgicOrders,
 	getTripgicOrder,
 	cancelTripgicOrder,
+	issueTicketForHeldOrder,
 } from "../services/tripgicBooking";
 
 // Bookings made through TripGic (flights + hotels). See
@@ -194,6 +195,18 @@ tripgicRouter.get("/orders/:id", authenticate, async (req: AuthenticatedRequest,
 tripgicRouter.post("/orders/:id/cancel", authenticate, requireBookingAccess, bookingRateLimit, async (req: AuthenticatedRequest, res: Response) => {
 	try {
 		return res.json(await cancelTripgicOrder(req.user!.id, req.params.id));
+	} catch (err) {
+		return respondToError(err, res);
+	}
+});
+
+// POST /api/v1/tripgic/orders/:id/issue-ticket   (admin only)
+// Issue the ticket for a flight that is still reserved but was never ticketed (typically the TripGic wallet
+// was short). The owner's alert about such bookings names this route.
+tripgicRouter.post("/orders/:id/issue-ticket", authenticate, bookingRateLimit, async (req: AuthenticatedRequest, res: Response) => {
+	try {
+		if (req.user?.role !== "admin") return res.status(403).json({ message: "Admin only" });
+		return res.json(await issueTicketForHeldOrder(req.params.id));
 	} catch (err) {
 		return respondToError(err, res);
 	}

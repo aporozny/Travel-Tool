@@ -90,3 +90,31 @@ Found by the browser check and fixed before finishing: the operator's Bookings i
 **Tests:** `tests/flightPaymentRules.test.ts` (17, run in CI) and `backend/scripts/flight-payments-api-test.js` (72 checks against the real database with a fake Duffel and a fake alert channel: happy path, double submit, every failure kind, retry limit, price change, unrecorded order, reconciler, and the HTTP routes). Older suites re-run with no regressions.
 
 **Not verified end to end:** the real Stripe card step and a real Duffel confirm/order, which need a browser and a Duffel test payment. Everything on our side of those two calls is tested.
+
+
+## TripGic held bookings never updated, fixed 22 Sep
+
+**The defect:** the only code that re-read a booking from TripGic ran from `GET /tripgic/orders/:id`, which no screen calls (the plan noted this in its route table). A booking that was "Reserved" stayed reserved for ever: nothing noticed a moved deadline, a ticket issued later, or a cancellation by the supplier, and a booking nobody listed never expired. At the time of the fix 9 test bookings were "held", every one with a ticketing error, some long past their deadline.
+
+**What TripGic really says (read from its sandbox on 21 Sep, nine bookings, fresh and long past deadline alike):** `booking_status: "hold"`, `ticket_status: "inQues"`, `payment_status: "pending"`, plus `auto_cancel_timestamp` (seconds since 1970, UTC). Two findings shaped the fix:
+- TripGic **never flips a booking to expired or cancelled by itself** when the deadline passes, so Drift has to expire it.
+- The **stored deadline can be out of date**: one booking had 03:59 UTC on our side but 13:45 UTC at TripGic. Expiring by the stored deadline would have cancelled a live reservation.
+
+**Fix (migration 046, `services/tripgicOrderSync.ts`, `services/tripgicStatus.ts`):**
+
+| What | How |
+|---|---|
+| Refresh | Every 10 minutes (and when a traveller opens Bookings, in the background) held bookings are re-read from TripGic: deadline, ticketed, cancelled |
+| Expiry | A held booking is expired only after its deadline has been confirmed with TripGic within the last 30 minutes, or is more than 2 hours old (so nothing stays held for ever if TripGic is unreachable). Opening Bookings checks overdue ones first, waiting at most 3 seconds |
+| Never ticketed | The owner gets ONE digest alert ("N bookings are reserved but not ticketed", labelled [TEST] for sandbox bookings) for a reservation whose ticket was never issued, with the fix in the email |
+| Ticketed bookings | Checked hourly until the trip is over. If TripGic says one is cancelled the owner is alerted (urgent for real bookings) and **nothing is changed automatically**, because the wording TripGic uses for ticketed/cancelled has never been seen |
+| Learning the wording | Every status TripGic reports is stored on the order (`supplier_status`); unrecognised wording is logged once |
+| Admin ticketing | `POST /api/v1/tripgic/orders/:id/issue-ticket` (admin): refreshes first, refuses if it is no longer held, past its deadline, a stay, or already ticketed, then issues the ticket and records what TripGic calls it. Use it once the wallet is funded |
+
+**First real run (21 Sep, 15:40 UTC):** the job refreshed all nine held bookings, expired three whose real deadlines had passed, and sent the owner the digest.
+
+**Tests:** `tests/tripgicStatus.test.ts` (10, CI, using the real observed values) and `backend/scripts/tripgic-order-sync-api-test.js` (46 checks with a fake TripGic and fake alerts against the real database; it restores every existing booking afterwards). The older TripGic order suite (46 checks) re-ran with no regressions.
+
+**Also fixed:** `auth.test.ts` and `operators.test.ts` failed their cleanup against the live database (the new consent-records table blocks deleting their temporary users), leaving `@example.com` users behind. CI did not show it because CI's older schema has no such table. They now clear consent records first. Five leftover users from two suite runs were removed.
+
+**Still true:** the words TripGic uses for a ticketed booking are unconfirmed until a booking is actually ticketed (the wallet has never been funded). After it is, run one `issue-ticket`, then read `supplier_status` and tighten `tripgicStatus.ts`.

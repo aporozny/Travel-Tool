@@ -21,6 +21,9 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  // consent_records is an append-only log with a foreign key to users, so this test's rows go first.
+  // (The catch is for CI, whose older schema has no such table.)
+  await pool.query("DELETE FROM consent_records WHERE user_id IN (SELECT id FROM users WHERE email LIKE 'op_%@example.com' OR email LIKE 'tv_%@example.com')").catch(() => {});
   await pool.query('DELETE FROM users WHERE email LIKE $1', ['op_%@example.com']);
   await pool.query('DELETE FROM users WHERE email LIKE $1', ['tv_%@example.com']);
   await pool.end();

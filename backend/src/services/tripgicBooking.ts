@@ -1,6 +1,7 @@
 import { pool } from "../utils/db";
 import { redis } from "../utils/redis";
-import { tripgicPost } from "../utils/tripgicClient";
+import { tripgicPost, tripgicMemberId } from "../utils/tripgicClient";
+import { syncHeldOrder, expireOverdueHeld, refreshOverdueForUser, refreshUserHeldOrders, recordSupplierStatus } from "./tripgicOrderSync";
 import { getActiveMarkupRule, computeMarkup, type FlightSliceView } from "./flights";
 import { mapTripgicSlices } from "./tripgicFlights";
 import { buildOccupancies } from "./tripgicStays";
@@ -57,7 +58,7 @@ const ORDER_LOCK_SECONDS = 120;
 const DEFAULT_GUEST_NATIONALITY = "AU";
 
 function memberId(): string {
-	return process.env.TRIPGIC_MEMBER_ID || "1";
+	return tripgicMemberId();
 }
 
 type PaymentStatus = "not_collected_sandbox" | "collected";
@@ -757,61 +758,22 @@ export async function createTripgicHotelOrder(params: {
 // ---- reading / cancelling -------------------------------------------------
 
 export async function listTripgicOrders(userId: string): Promise<OrderView[]> {
-	// Flight holds auto-cancel at the supplier; reflect that instead of
-	// showing a reservation that no longer exists.
-	await pool.query(
-		`UPDATE tripgic_orders SET status = 'expired', updated_at = NOW()
-		 WHERE user_id = $1 AND status = 'held' AND hold_expires_at IS NOT NULL AND hold_expires_at < NOW()
-		 RETURNING id`,
-		[userId]
-	).then((r) => r.rows.forEach((o: { id: string }) => notifyOrderChanged("tripgic", o.id)));
+	// TripGic never expires a booking itself (its status stays "hold" past the deadline), so Drift does.
+	// The deadline can move, so anything past its deadline is checked with TripGic first (waiting at most
+	// a few seconds), and only then expired. The rest of this traveller's held bookings refresh in the
+	// background for next time.
+	await refreshOverdueForUser(userId);
+	await expireOverdueHeld(userId);
+	void refreshUserHeldOrders(userId);
 	const { rows } = await pool.query("SELECT * FROM tripgic_orders WHERE user_id = $1 ORDER BY created_at DESC", [userId]);
 	return rows.map(rowToView);
-}
-
-// Opening a single booking re-reads it from TripGic, because things happen
-// to a booking outside Drift: the hold deadline moves, the supplier or
-// TripGic operations cancels or ticket it after the fact. Best-effort --
-// if TripGic is unreachable the stored row is returned as-is.
-//
-// Status vocabulary here is only partly confirmed: "hold" and "cancel..."
-// have been seen; the "ticketed"/"confirmed" spellings are matched loosely
-// because no booking has got past issue-ticket yet (wallet empty).
-async function syncOrderFromTripgic(order: any): Promise<any> {
-	if (order.status !== "held") return order;
-	try {
-		const d = await tripgicPost<TripgicResult>("/booking-details", { member_id: memberId(), tracking_id: order.tripgic_tracking_id });
-		if (d.status !== "success" || !d.booking) return order;
-		const b = d.booking;
-		const bookingStatus = String(b.booking_status ?? "");
-		const ticketStatus = String(b.ticket_status ?? "");
-		let status: string | null = null;
-		if (/cancel|void/i.test(bookingStatus)) status = "cancelled";
-		else if (/^(ticketed|issued)$/i.test(ticketStatus) || /^(ticketed|confirmed|voucher)/i.test(bookingStatus)) status = order.product_type === "flight" ? "ticketed" : "confirmed";
-		const autoCancel = Number(b.auto_cancel_timestamp);
-		const { rows } = await pool.query(
-			`UPDATE tripgic_orders SET
-			   status = COALESCE($2, status),
-			   hold_expires_at = COALESCE($3, hold_expires_at),
-			   fulfilled_at = CASE WHEN $2 IN ('ticketed','confirmed') THEN NOW() ELSE fulfilled_at END,
-			   cancelled_at = CASE WHEN $2 = 'cancelled' THEN NOW() ELSE cancelled_at END,
-			   updated_at = NOW()
-			 WHERE id = $1 RETURNING *`,
-			[order.id, status, autoCancel && order.hold_expires_at ? new Date(autoCancel * 1000) : null]
-		);
-		if (status && rows[0]) notifyOrderChanged("tripgic", rows[0].id);
-		return rows[0];
-	} catch (err) {
-		console.error(`TripGic order sync failed for ${order.tripgic_tracking_id}:`, err);
-		return order;
-	}
 }
 
 export async function getTripgicOrder(userId: string, orderId: string): Promise<OrderView> {
 	if (!/^[0-9a-f-]{36}$/i.test(orderId)) throw new BookingError("Booking not found", 404, "not_found");
 	const { rows } = await pool.query("SELECT * FROM tripgic_orders WHERE id = $1 AND user_id = $2", [orderId, userId]);
 	if (!rows.length) throw new BookingError("Booking not found", 404, "not_found");
-	return rowToView(await syncOrderFromTripgic(rows[0]));
+	return rowToView(await syncHeldOrder(rows[0]));
 }
 
 export async function cancelTripgicOrder(userId: string, orderId: string): Promise<OrderView> {
@@ -839,4 +801,40 @@ export async function cancelTripgicOrder(userId: string, orderId: string): Promi
 	);
 	notifyOrderChanged("tripgic", updated[0].id);
 	return rowToView(updated[0]);
+}
+
+// Admin: issue the ticket for a booking that is still reserved. Used when ticketing failed (typically the
+// TripGic wallet was short) and has since been sorted out. Refreshes the booking first, so a booking that
+// has meanwhile been ticketed, cancelled or has passed its deadline is never ticketed again or twice.
+export async function issueTicketForHeldOrder(orderId: string): Promise<OrderView> {
+	if (!/^[0-9a-f-]{36}$/i.test(orderId)) throw new BookingError("Booking not found", 404, "not_found");
+	const found = (await pool.query("SELECT * FROM tripgic_orders WHERE id = $1", [orderId])).rows[0];
+	if (!found) throw new BookingError("Booking not found", 404, "not_found");
+	if (found.product_type !== "flight") throw new BookingError("Only flights are ticketed separately", 409, "not_ticketable");
+
+	const order = await syncHeldOrder(found);
+	if (order.status !== "held") throw new BookingError(`This booking is ${order.status}, so it cannot be ticketed`, 409, "not_held");
+	if (order.hold_expires_at && new Date(order.hold_expires_at).getTime() < Date.now()) {
+		throw new BookingError("The reservation has passed its deadline", 409, "hold_expired");
+	}
+
+	return withOrderLock(order.quote_id, async () => {
+		const issued = await tripgicPost<TripgicResult>("/flight/issue-ticket", {
+			member_id: memberId(),
+			tracking_id: order.tripgic_tracking_id,
+			price_change_accepted: "no",
+			notes: order.payment_status === "not_collected_sandbox" ? "Drift sandbox booking" : "",
+		});
+		if (issued.status !== "success") {
+			const code = classifyFailure(issued.reason);
+			console.error(`TripGic issue-ticket failed for ${order.tripgic_tracking_id}:`, issued.reason);
+			await markOrder(order.id, { fulfilmentError: code });
+			throw new BookingError("TripGic did not issue the ticket", 502, code);
+		}
+		const ticketed = await markOrder(order.id, { status: "ticketed", fulfilled: true });
+		notifyOrderChanged("tripgic", ticketed.id);
+		// Learn what TripGic calls a ticketed booking (its wording has never been seen).
+		void recordSupplierStatus(ticketed.id);
+		return rowToView(ticketed);
+	});
 }

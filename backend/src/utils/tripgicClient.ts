@@ -26,6 +26,12 @@ function requireEnv(name: string): string {
 	return value;
 }
 
+// The TripGic account Drift books under (partner_id 15's member id). Shared so the booking service and
+// the order-sync job cannot drift apart on it.
+export function tripgicMemberId(): string {
+	return process.env.TRIPGIC_MEMBER_ID || "1";
+}
+
 export async function tripgicPost<T>(path: string, body: unknown, options: { timeoutMs?: number } = {}): Promise<T> {
 	const base = requireEnv("TRIPGIC_API_ENDPOINT").replace(/\/+$/, "");
 	const apiKey = requireEnv("TRIPGIC_API_KEY");
