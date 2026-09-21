@@ -26,7 +26,16 @@ photosRouter.get("/", async (req: Request, res: Response) => {
 	}
 
 	// Validate ref format - Google photo refs are alphanumeric + hyphens/underscores
-	const decodedRef = decodeURIComponent(ref);
+	// Express has already decoded the query string once, so a literal "%" (for
+	// example ?ref=%25) reaches here as a lone "%" and decodeURIComponent throws
+	// URIError. In an async Express 4 handler that is an unhandled rejection, which
+	// Node 20 treats as fatal: one unauthenticated request took the whole API down.
+	let decodedRef: string;
+	try {
+		decodedRef = decodeURIComponent(ref);
+	} catch {
+		return res.status(400).json({ message: "Invalid photo reference" });
+	}
 	if (!/^[A-Za-z0-9_\-\/]+$/.test(decodedRef)) {
 		return res.status(400).json({ message: "Invalid photo reference" });
 	}
