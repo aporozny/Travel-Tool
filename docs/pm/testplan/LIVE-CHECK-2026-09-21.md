@@ -6,10 +6,10 @@ The five test-plan parts (A to E) found defects by **reading code**. This is the
 
 | Defect | What happened | Status now |
 |---|---|---|
-| D-A-2 Profile preference chips never save | `PUT /travelers/me/preferences` returned **404 Route not found** (the API only has GET and PATCH) | Open |
-| D-B-3 Reviews | `GET /reviews/me` and `GET /reviews/operator/:id` both returned **500** (`reviews.title` column does not exist) | Open |
-| D-C-5 Private posts | Posting with visibility `private` returned **500** (database only allows public / members / connections) | Open |
-| D-C-3 Photo upload | A 1 MB photo returned **413 Payload Too Large** (JSON body limit is 10 KB, nginx has no upload size or `/uploads` route) | Open |
+| D-A-2 Profile preference chips never save | `PUT /travelers/me/preferences` returned **404 Route not found** (the API only has GET and PATCH) | **Fixed** 21 Sep (screen now sends PATCH; a failed save puts the chip back) |
+| D-B-3 Reviews | `GET /reviews/me` and `GET /reviews/operator/:id` both returned **500** (`reviews.title` column does not exist) | **Fixed** 21 Sep (migration 043 adds `reviews.title`) |
+| D-C-5 Private posts | Posting with visibility `private` returned **500** (database only allows public / members / connections) | **Fixed** 21 Sep (migration 043 allows `private`; posts are now hidden from everyone but the author) |
+| D-C-3 Photo upload | A 1 MB photo returned **413 Payload Too Large** (JSON body limit is 10 KB, nginx has no upload size or `/uploads` route) | **Fixed** 21 Sep (route-specific 14 MB body limit, nginx `client_max_body_size` and `/uploads/` route, uploads folder owned by the backend user, real-image check) |
 | D-D-3 Plan a trip | Date-only dates returned **400** | **Fixed** 21 Sep (dates now accepted, region and public flag stored) |
 | D-D-4 Missed check-ins | No trip has ever been marked overdue or escalated; there was no scheduler | **Fixed** 21 Sep (monitor built, see below) |
 | D-D-2 "Share my location now" crash | Could not run: needs Trip Mode consent (403). Confirmed by code: the API returns only `{id, recorded_at}` and the screen read `.latitude` | **Fixed** 21 Sep (screen uses the coordinates it sent) |
@@ -34,3 +34,14 @@ Everything that needs a browser (all clicking), operator accounts (dashboard, cl
 Every minute an active trip whose check-in is more than 15 minutes late becomes `overdue` and the Drift safety reviewer is paged (email, and SMS because it is urgent) with who, where, how late, last check-in and last shared location. If it is still overdue after 60 minutes, the reviewer is told a second time. **Emergency contacts are NOT messaged automatically**: that stays off until the owner sets `SAFETY_NOTIFY_CONTACTS=on`, because it sends messages to real people. When it is on, contacts get a calm message ("may only mean a flat battery ... contact the local emergency services if worried") and an all-clear if the traveller then checks in. Seeded test accounts go through every state change but nobody real is ever alerted. Verified end to end (21 checks) on a test account.
 
 Note: the reviewer *email* will not arrive while SendGrid is out of credits; the SMS still does.
+
+
+## Also fixed 21 Sep (found by reading the code while fixing the above)
+
+- **Community comments** returned 500 on add, list and delete: the code used `author_id`, the table column is `user_id`. Fixed, and comments on a post the viewer cannot see are now refused.
+- **Community reactions** returned 500 on add: the code named a uniqueness rule the table does not have. A member has one reaction per post; the same reaction again removes it, a different one replaces it.
+- **Private / connections posts could be read by anyone with the post id** (post detail and its comments ignored visibility). Now checked on every read, react and comment.
+- **`my_reaction` was never returned** on Discover and post detail (those routes never looked up who was asking).
+- **Photo-only posts** now work (the database required text).
+- **Attached photo URLs** must now be ones our own upload created (anything else is a 400).
+- Test: `backend/scripts/community-fixes-api-test.js`, 38 checks, all passing.

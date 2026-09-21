@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { pool } from '../utils/db';
-import { authenticate, AuthenticatedRequest } from '../middleware/authenticate';
+import { authenticate, optionalAuth, AuthenticatedRequest } from '../middleware/authenticate';
 import { resolveOrCreatePlace, DailyPlaceLimitError } from '../services/memberPlaces';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -14,6 +14,38 @@ const UPLOAD_DIR = process.env.UPLOAD_DIR || '/app/uploads';
 // Ensure upload directory exists
 if (!fs.existsSync(UPLOAD_DIR)) {
   fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+}
+
+const UUID_RE = /^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
+const isUuid = (s: unknown): s is string => typeof s === 'string' && UUID_RE.test(s);
+
+// Who may see a post: everyone if it is public, its author always, any signed-in
+// member if it is members-only, and accepted connections if it is connections-only.
+// `viewer` is a SQL expression for the viewer's user id (NULL when signed out).
+const visibleToViewer = (post: string, viewer: string) => `(
+  ${post}.visibility = 'public'
+  OR ${post}.author_id = ${viewer}
+  OR (${post}.visibility = 'members' AND ${viewer} IS NOT NULL)
+  OR (${post}.visibility = 'connections' AND EXISTS (
+    SELECT 1 FROM member_connections mc
+    WHERE mc.status = 'accepted'
+      AND ((mc.requester_id = ${post}.author_id AND mc.recipient_id = ${viewer})
+        OR (mc.recipient_id = ${post}.author_id AND mc.requester_id = ${viewer}))
+  ))
+)`;
+
+// Only files that came out of POST /community/upload may be attached to a post.
+const UPLOAD_URL_RE = /^\/uploads\/[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}\.(jpg|png|webp|heic)$/;
+
+// Does the file's own first bytes match the type the client claims?
+function looksLikeImage(buf: Buffer, mimeType: string): boolean {
+  switch (mimeType) {
+    case 'image/jpeg': return buf.length > 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff;
+    case 'image/png': return buf.length > 8 && buf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+    case 'image/webp': return buf.length > 12 && buf.subarray(0, 4).toString('latin1') === 'RIFF' && buf.subarray(8, 12).toString('latin1') === 'WEBP';
+    case 'image/heic': return buf.length > 12 && buf.subarray(4, 8).toString('latin1') === 'ftyp';
+    default: return false;
+  }
 }
 
 // ─── SCHEMAS ─────────────────────────────────────────────────────────────────
@@ -38,7 +70,7 @@ const createPostSchema = z.object({
   }).optional(),
   operatorId: z.string().uuid().optional(),
   visibility: z.enum(['public', 'connections', 'private']).default('public'),
-  mediaUrls: z.array(z.string()).max(5).optional(),
+  mediaUrls: z.array(z.string().regex(UPLOAD_URL_RE, 'Photos must be uploaded through Drift first')).max(5).optional(),
 });
 
 const commentSchema = z.object({
@@ -119,7 +151,7 @@ communityRouter.get('/feed', authenticate, async (req: AuthenticatedRequest, res
 
 // GET /api/v1/community/discover
 // Discover tab — top posts by engagement, no follow requirement
-communityRouter.get('/discover', async (req: AuthenticatedRequest, res: Response) => {
+communityRouter.get('/discover', optionalAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { page = '1', limit = '20', region } = req.query;
     const offset = (parseInt(page as string) - 1) * parseInt(limit as string);
@@ -225,7 +257,7 @@ communityRouter.post('/posts', authenticate, async (req: AuthenticatedRequest, r
            (author_id, author_type, body, region, lat, lng, place_id, operator_id, visibility)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
          RETURNING id, created_at`,
-        [req.user!.id, authorType, body.body ?? null, body.region ?? null,
+        [req.user!.id, authorType, body.body ?? '', body.region ?? null,
          body.lat ?? null, body.lng ?? null, resolvedPlaceId,
          body.operatorId ?? null, body.visibility]
       );
@@ -263,9 +295,10 @@ communityRouter.post('/posts', authenticate, async (req: AuthenticatedRequest, r
 });
 
 // GET /api/v1/community/posts/:id
-communityRouter.get('/posts/:id', async (req: AuthenticatedRequest, res: Response) => {
+communityRouter.get('/posts/:id', optionalAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const userId = req.user?.id ?? null;
+    if (!isUuid(req.params.id)) return res.status(404).json({ message: 'Post not found' });
 
     const result = await pool.query(
       `SELECT
@@ -289,6 +322,7 @@ communityRouter.get('/posts/:id', async (req: AuthenticatedRequest, res: Respons
        LEFT JOIN post_media pm ON pm.post_id = cp.id
        LEFT JOIN post_reactions pr ON pr.post_id = cp.id AND pr.user_id = $2
        WHERE cp.id = $1 AND cp.is_deleted = FALSE
+         AND ${visibleToViewer('cp', '$2::uuid')}
        GROUP BY cp.id, u.id, t.display_name, t.avatar_url, t.nationality,
                 pc.name, pc.address, pc.category, pr.reaction`,
       [req.params.id, userId]
@@ -305,6 +339,7 @@ communityRouter.get('/posts/:id', async (req: AuthenticatedRequest, res: Respons
 // DELETE /api/v1/community/posts/:id
 communityRouter.delete('/posts/:id', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
+    if (!isUuid(req.params.id)) return res.status(404).json({ message: 'Post not found' });
     const result = await pool.query(
       `UPDATE community_posts SET is_deleted = TRUE
        WHERE id = $1 AND author_id = $2
@@ -324,30 +359,38 @@ communityRouter.delete('/posts/:id', authenticate, async (req: AuthenticatedRequ
 // POST /api/v1/community/posts/:id/react
 communityRouter.post('/posts/:id/react', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const reaction = req.body.reaction ?? 'like';
+    const reaction = req.body?.reaction ?? 'like';
     const valid = ['like', 'fire', 'heart', 'wave'];
     if (!valid.includes(reaction)) return res.status(400).json({ message: 'Invalid reaction' });
 
-    // Toggle — if exists remove, if not add
+    if (!isUuid(req.params.id)) return res.status(404).json({ message: 'Post not found' });
+    const visible = await pool.query(
+      `SELECT 1 FROM community_posts cp WHERE cp.id = $1 AND cp.is_deleted = FALSE AND ${visibleToViewer('cp', '$2::uuid')}`,
+      [req.params.id, req.user!.id]
+    );
+    if (!visible.rows.length) return res.status(404).json({ message: 'Post not found' });
+
+    // A member has one reaction per post (unique on post + user).
+    // Same reaction again removes it; a different one replaces it.
     const existing = await pool.query(
-      `SELECT id FROM post_reactions WHERE post_id = $1 AND user_id = $2 AND reaction = $3`,
-      [req.params.id, req.user!.id, reaction]
+      `SELECT reaction FROM post_reactions WHERE post_id = $1 AND user_id = $2`,
+      [req.params.id, req.user!.id]
     );
 
-    if (existing.rows.length) {
+    if (existing.rows.length && existing.rows[0].reaction === reaction) {
       await pool.query(
-        `DELETE FROM post_reactions WHERE post_id = $1 AND user_id = $2 AND reaction = $3`,
-        [req.params.id, req.user!.id, reaction]
+        `DELETE FROM post_reactions WHERE post_id = $1 AND user_id = $2`,
+        [req.params.id, req.user!.id]
       );
       return res.json({ action: 'removed', reaction });
-    } else {
-      await pool.query(
-        `INSERT INTO post_reactions (post_id, user_id, reaction) VALUES ($1, $2, $3)
-         ON CONFLICT (post_id, user_id, reaction) DO NOTHING`,
-        [req.params.id, req.user!.id, reaction]
-      );
-      return res.json({ action: 'added', reaction });
     }
+
+    await pool.query(
+      `INSERT INTO post_reactions (post_id, user_id, reaction) VALUES ($1, $2, $3)
+       ON CONFLICT (post_id, user_id) DO UPDATE SET reaction = EXCLUDED.reaction`,
+      [req.params.id, req.user!.id, reaction]
+    );
+    return res.json({ action: existing.rows.length ? 'changed' : 'added', reaction });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ message: 'Internal server error' });
@@ -357,8 +400,9 @@ communityRouter.post('/posts/:id/react', authenticate, async (req: Authenticated
 // ─── COMMENTS ────────────────────────────────────────────────────────────────
 
 // GET /api/v1/community/posts/:id/comments
-communityRouter.get('/posts/:id/comments', async (req: AuthenticatedRequest, res: Response) => {
+communityRouter.get('/posts/:id/comments', optionalAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
+    if (!isUuid(req.params.id)) return res.status(404).json({ message: 'Post not found' });
     const result = await pool.query(
       `SELECT
          pc.id,
@@ -368,11 +412,13 @@ communityRouter.get('/posts/:id/comments', async (req: AuthenticatedRequest, res
          t.display_name,
          t.avatar_url
        FROM post_comments pc
-       JOIN users u ON u.id = pc.author_id
-       LEFT JOIN travelers t ON t.user_id = pc.author_id
-       WHERE pc.post_id = $1 AND pc.is_deleted = FALSE
+       JOIN community_posts cp ON cp.id = pc.post_id
+       JOIN users u ON u.id = pc.user_id
+       LEFT JOIN travelers t ON t.user_id = pc.user_id
+       WHERE pc.post_id = $1 AND pc.is_deleted = FALSE AND pc.is_hidden = FALSE
+         AND cp.is_deleted = FALSE AND ${visibleToViewer('cp', '$2::uuid')}
        ORDER BY pc.created_at ASC`,
-      [req.params.id]
+      [req.params.id, req.user?.id ?? null]
     );
     return res.json(result.rows);
   } catch (err) {
@@ -386,8 +432,15 @@ communityRouter.post('/posts/:id/comments', authenticate, async (req: Authentica
   try {
     const body = commentSchema.parse(req.body);
 
+    if (!isUuid(req.params.id)) return res.status(404).json({ message: 'Post not found' });
+    const visible = await pool.query(
+      `SELECT 1 FROM community_posts cp WHERE cp.id = $1 AND cp.is_deleted = FALSE AND ${visibleToViewer('cp', '$2::uuid')}`,
+      [req.params.id, req.user!.id]
+    );
+    if (!visible.rows.length) return res.status(404).json({ message: 'Post not found' });
+
     const result = await pool.query(
-      `INSERT INTO post_comments (post_id, author_id, body)
+      `INSERT INTO post_comments (post_id, user_id, body)
        VALUES ($1, $2, $3)
        RETURNING id, created_at`,
       [req.params.id, req.user!.id, body.body]
@@ -404,11 +457,14 @@ communityRouter.post('/posts/:id/comments', authenticate, async (req: Authentica
 // DELETE /api/v1/community/posts/:postId/comments/:commentId
 communityRouter.delete('/posts/:postId/comments/:commentId', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    await pool.query(
+    if (!isUuid(req.params.postId) || !isUuid(req.params.commentId)) return res.status(404).json({ message: 'Comment not found' });
+    const result = await pool.query(
       `UPDATE post_comments SET is_deleted = TRUE
-       WHERE id = $1 AND author_id = $2`,
-      [req.params.commentId, req.user!.id]
+       WHERE id = $1 AND post_id = $2 AND user_id = $3 AND is_deleted = FALSE
+       RETURNING id`,
+      [req.params.commentId, req.params.postId, req.user!.id]
     );
+    if (!result.rows.length) return res.status(404).json({ message: 'Comment not found' });
     return res.json({ success: true });
   } catch (err) {
     console.error(err);
@@ -434,12 +490,20 @@ communityRouter.post('/upload', authenticate, async (req: AuthenticatedRequest, 
 
     if (!validTypes[mimeType]) return res.status(400).json({ message: 'Invalid image type' });
 
+    if (typeof data !== 'string') return res.status(400).json({ message: 'data must be a base64 string' });
+
     // Decode base64
     const buffer = Buffer.from(data, 'base64');
 
     // Limit 10MB
     if (buffer.length > 10 * 1024 * 1024) {
       return res.status(400).json({ message: 'Image too large (max 10MB)' });
+    }
+
+    // The bytes must really be the image type claimed (a text or HTML file
+    // renamed to .png must not be stored and served from our own domain).
+    if (!looksLikeImage(buffer, mimeType)) {
+      return res.status(400).json({ message: 'That file is not a valid image' });
     }
 
     const filename = `${crypto.randomUUID()}.${validTypes[mimeType]}`;
@@ -459,6 +523,7 @@ communityRouter.post('/upload', authenticate, async (req: AuthenticatedRequest, 
 communityRouter.get('/posts', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { memberId } = req.query;
+    if (memberId !== undefined && !isUuid(memberId)) return res.status(400).json({ message: 'Invalid memberId' });
     const targetId = memberId ?? req.user!.id;
 
     const result = await pool.query(

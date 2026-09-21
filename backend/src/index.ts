@@ -47,6 +47,10 @@ app.use(cors({
   origin: process.env.FRONTEND_URL || '*',
   credentials: true,
 }));
+// Photo upload sends the image as base64 in JSON (10 MB image is about 13.4 MB of
+// text). Parse that one route with a bigger limit first; body-parser skips a
+// request it has already parsed, so every other route keeps the small limit.
+app.use('/api/v1/community/upload', express.json({ limit: '14mb' }));
 app.use(express.json({ limit: '10kb' })); // prevent large payload attacks
 app.use(morgan(process.env.NODE_ENV === 'test' ? 'silent' : 'dev'));
 

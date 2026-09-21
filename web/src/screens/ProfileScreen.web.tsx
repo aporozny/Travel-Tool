@@ -46,9 +46,16 @@ export default function ProfileScreen() {
 
   const updatePref = async (patch: Partial<TravelerPreferences>) => {
     if (!prefs) return;
-    const updated = { ...prefs, ...patch };
-    setPrefs(updated);
-    await api.put('/travelers/me/preferences', updated);
+    const previous = prefs;
+    setPrefs({ ...prefs, ...patch });
+    try {
+      // The API accepts partial updates on PATCH only (there is no PUT route).
+      const res = await api.patch('/travelers/me/preferences', patch);
+      setPrefs(res.data);
+    } catch (err) {
+      console.error(err);
+      setPrefs(previous); // the save failed, so put the chip back the way it was
+    }
   };
 
   const toggle = (arr: string[], val: string) =>
