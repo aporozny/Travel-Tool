@@ -3,6 +3,7 @@ import api from '../services/api.web';
 import { Booking } from '@/types';
 import { TravelBookings } from './TravelBookings.web';
 import { TripUpdates } from './TripUpdates.web';
+import PendingFlightPayments from './PendingFlightPayments.web';
 
 const STATUS_STYLES: Record<string, React.CSSProperties> = {
   pending:   { background: '#FFF8E1', color: '#F57F17' },
@@ -29,6 +30,7 @@ export default function BookingsScreen() {
   return (
     <div style={styles.container}>
       <h2 style={styles.title}>Bookings</h2>
+      <PendingFlightPayments />
       <TripUpdates />
       <TravelBookings onLoaded={setTravelCount} />
       {loading ? (

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import api from '../services/api.web';
 import { useTripgicBookingEnabled, TripgicFlightCheckout, TripgicOrders, type FlightPax, type Contact } from './TripgicCheckout.web';
 import { Price, CurrencySelect, useCurrency, sumPrices } from '../services/currency.web';
+import PendingFlightPayments from './PendingFlightPayments.web';
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements, CardNumberElement, CardExpiryElement, CardCvcElement, useStripe, useElements } from '@stripe/react-stripe-js';
 
@@ -208,7 +209,7 @@ function CheckoutModal({
   onClose: () => void;
   onBooked: (booking: { bookingReference: string }) => void;
 }) {
-  const [step, setStep] = useState<'passengers' | 'payment' | 'submitting'>('passengers');
+  const [step, setStep] = useState<'passengers' | 'payment' | 'submitting' | 'stuck'>('passengers');
   const [passengers, setPassengers] = useState<PassengerForm[]>(
     offer.passengers.map((p) => ({
       id: p.id,
@@ -225,6 +226,10 @@ function CheckoutModal({
   const [paymentIntent, setPaymentIntent] = useState<{ id: string; clientToken: string; amount: string; currency: string } | null>(null);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  // Set when the card has been charged but the booking is not finished. The server keeps the
+  // payment on record, so nothing here is lost if the traveller closes this window.
+  const [stuck, setStuck] = useState<null | { paymentIntentId: string; message: string; stage: 'confirm' | 'order'; canRetry: boolean; canRefund: boolean }>(null);
+  const [refundAsked, setRefundAsked] = useState('');
 
   const updatePassenger = (idx: number, field: keyof PassengerForm, value: string) => {
     setPassengers((prev) => prev.map((p, i) => (i === idx ? { ...p, [field]: value } : p)));
@@ -234,11 +239,24 @@ function CheckoutModal({
   // or a phone number that is not international (+61...) only AFTER payment.
   const passengersValid = passengers.every((p) => p.givenName && p.familyName && p.bornOn && /^\S+@\S+\.\S+$/.test(p.email) && /^\+\d{7,15}$/.test(p.phoneNumber.replace(/[\s-]/g, '')));
 
+  const passengerPayload = () => passengers.map((p) => ({
+    id: p.id,
+    title: p.title,
+    gender: p.gender,
+    givenName: p.givenName,
+    familyName: p.familyName,
+    bornOn: p.bornOn,
+    email: p.email,
+    phoneNumber: p.phoneNumber,
+  }));
+
   const handleContinueToPayment = async () => {
     setError('');
     setSubmitting(true);
     try {
-      const res = await api.post('/flights/payment-intents', { offerId: offer.id });
+      // The passengers go with this call so the server checks them (and that they match the
+      // fare) BEFORE the card step, while a mistake costs nothing.
+      const res = await api.post('/flights/payment-intents', { offerId: offer.id, passengers: passengerPayload() });
       setPaymentIntent(res.data);
       setStep('payment');
     } catch (err: any) {
@@ -248,30 +266,53 @@ function CheckoutModal({
     }
   };
 
-  const handleCardSuccess = async () => {
-    if (!paymentIntent) return;
+  // Confirm the payment, then place the booking. Safe to run again: the server confirms a payment
+  // once and returns the same booking if it has already been placed, so "Try again" can never
+  // charge or book twice.
+  const finishBooking = async (paymentIntentId: string) => {
     setStep('submitting');
     setError('');
+    setStuck(null);
     try {
-      await api.post('/flights/payment-intents/confirm', { paymentIntentId: paymentIntent.id });
-      const res = await api.post('/flights/orders', {
-        offerId: offer.id,
-        paymentIntentId: paymentIntent.id,
-        passengers: passengers.map((p) => ({
-          id: p.id,
-          title: p.title,
-          gender: p.gender,
-          givenName: p.givenName,
-          familyName: p.familyName,
-          bornOn: p.bornOn,
-          email: p.email,
-          phoneNumber: p.phoneNumber,
-        })),
+      await api.post('/flights/payment-intents/confirm', { paymentIntentId });
+    } catch (err: any) {
+      setStuck({
+        paymentIntentId,
+        stage: 'confirm',
+        message: err?.response?.data?.message || 'We could not confirm your payment just now. Nothing has been booked. Your bank may show a temporary hold that clears by itself.',
+        canRetry: true,
+        canRefund: false,
       });
+      setStep('stuck');
+      return;
+    }
+    try {
+      const res = await api.post('/flights/orders', { offerId: offer.id, paymentIntentId, passengers: passengerPayload() });
       onBooked(res.data);
     } catch (err: any) {
-      setError(err?.response?.data?.message || 'Could not complete booking -- your card was charged, contact support with this reference: ' + paymentIntent.id);
-      setStep('payment');
+      const d = err?.response?.data;
+      setStuck({
+        paymentIntentId: d?.paymentIntentId ?? paymentIntentId,
+        stage: 'order',
+        message: d?.message || 'We could not complete your booking just now. Your payment is safe and recorded: we have been alerted, and it will show under "A payment needs attention" on the Flights and Bookings pages.',
+        canRetry: d?.code === 'order_failed_after_payment' ? !!d.canRetry : true,
+        canRefund: true,
+      });
+      setStep('stuck');
+    }
+  };
+
+  const handleCardSuccess = () => {
+    if (paymentIntent) finishBooking(paymentIntent.id);
+  };
+
+  const askForRefund = async () => {
+    if (!stuck) return;
+    try {
+      const r = await api.post(`/flights/payments/${stuck.paymentIntentId}/refund-request`);
+      setRefundAsked(r.data.message || 'Refund requested.');
+    } catch (err: any) {
+      setRefundAsked(err?.response?.data?.message || 'We could not send that request. Please try again.');
     }
   };
 
@@ -292,7 +333,7 @@ function CheckoutModal({
     <div style={cs.overlay} onClick={onClose}>
       <div style={cs.modal} onClick={(e) => e.stopPropagation()}>
         <div style={cs.modalHeader}>
-          <h2 style={cs.modalTitle}>{step === 'passengers' ? 'Passenger details' : 'Payment'}</h2>
+          <h2 style={cs.modalTitle}>{step === 'passengers' ? 'Passenger details' : step === 'stuck' ? 'Your booking is not finished' : 'Payment'}</h2>
           <button style={cs.closeBtn} onClick={onClose}>✕</button>
         </div>
 
@@ -346,6 +387,28 @@ function CheckoutModal({
         )}
 
         {step === 'submitting' && <p style={s.muted}>Booking your flight...</p>}
+
+        {step === 'stuck' && stuck && (
+          <div>
+            <div style={{ background: '#FFF8E1', border: '1px solid #F0D9A0', borderRadius: 12, padding: 16, marginBottom: 14 }}>
+              <p style={{ fontWeight: 700, margin: '0 0 6px', color: '#1A1A1A' }}>
+                {stuck.stage === 'order' ? 'Your payment went through, but your booking is not finished.' : 'We could not confirm your payment yet.'}
+              </p>
+              <p style={{ margin: 0, color: '#5c4a00', lineHeight: 1.45 }}>{stuck.message}</p>
+              <p style={{ margin: '10px 0 0', fontSize: 11, color: C.muted, wordBreak: 'break-all' }}>Reference: {stuck.paymentIntentId}</p>
+            </div>
+            {stuck.canRetry && (
+              <button style={s.searchBtn} onClick={() => finishBooking(stuck.paymentIntentId)}>Try again</button>
+            )}
+            {stuck.canRefund && !refundAsked && (
+              <button style={{ ...s.searchBtn, background: '#fff', color: C.text, border: `1px solid ${C.border}`, marginTop: 10 }} onClick={askForRefund}>
+                Ask for a refund
+              </button>
+            )}
+            {refundAsked && <p style={{ ...s.muted, marginTop: 10 }}>{refundAsked}</p>}
+            <p style={{ ...s.muted, marginTop: 12 }}>You can close this window. We keep your payment on record and show it under "A payment needs attention" on the Flights and Bookings pages until it is sorted out.</p>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -572,6 +635,8 @@ export default function FlightsScreen() {
         <h1 style={s.title}>Flights</h1>
         <p style={s.subtitle}>Search real fares and book directly.</p>
       </div>
+
+      <PendingFlightPayments onBooked={loadMyOrders} />
 
       <div style={s.searchCard}>
         <div style={s.tripTypeRow}>

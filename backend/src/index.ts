@@ -32,6 +32,7 @@ import { currenciesRouter } from './routes/currencies';
 import { notificationsRouter } from './routes/notifications';
 import { startNotificationWorker } from './services/tripNotificationWorker';
 import { startSafetyMonitor } from './services/safetyMonitor';
+import { startPaymentReconciler } from './services/flightPayments';
 import { voiceAgentRouter } from './routes/voiceAgent';
 import { errorHandler } from './middleware/errorHandler';
 import { notFound } from './middleware/notFound';
@@ -103,5 +104,6 @@ if (require.main === module) {
     console.log(`Server running on port ${PORT}`);
     startNotificationWorker();
     startSafetyMonitor();
+    startPaymentReconciler();
   });
 }

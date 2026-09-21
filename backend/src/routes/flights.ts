@@ -2,7 +2,12 @@ import { Router, Request, Response, NextFunction } from "express";
 import { z } from "zod";
 import { DuffelError } from "@duffel/api";
 import { authenticate, AuthenticatedRequest } from "../middleware/authenticate";
-import { searchFlights, createCheckoutPaymentIntent, confirmCheckoutPaymentIntent, createFlightOrder, listFlightOrders, type FlightOfferView } from "../services/flights";
+import { searchFlights, listFlightOrders, type FlightOfferView } from "../services/flights";
+import {
+	createCheckoutPaymentIntent, confirmCheckoutPaymentIntent, placeOrder, listOpenPayments, requestRefund, markRefunded,
+	PaymentError, OrderFailedAfterPayment,
+} from "../services/flightPayments";
+import { passengerInputSchema } from "../services/flightPaymentRules";
 import { searchTravelportFlights } from "../services/travelportFlights";
 import { searchTripgicFlights } from "../services/tripgicFlights";
 import { isDuffelTestMode } from "../utils/duffelClient";
@@ -106,24 +111,52 @@ flightsRouter.post("/search", authenticate, async (req: AuthenticatedRequest, re
 
 const paymentIntentSchema = z.object({
 	offerId: z.string().min(1),
+	// Checked, and kept, BEFORE the card is charged: a bad phone number or a wrong passenger
+	// list is caught while it costs nothing to fix (it used to be found only after payment).
+	passengers: z.array(passengerInputSchema).min(1).optional(),
 });
+
+// Answers for the payment ledger's own errors. Returns true when it has replied.
+function respondToPaymentError(err: unknown, res: Response): boolean {
+	if (err instanceof PaymentError) {
+		res.status(err.status).json({ message: err.message });
+		return true;
+	}
+	if (err instanceof OrderFailedAfterPayment) {
+		// The card WAS charged. Tell the screen exactly what state that leaves things in.
+		res.status(422).json({
+			message: err.message,
+			code: "order_failed_after_payment",
+			reason: err.reason,
+			paymentIntentId: err.paymentIntentId,
+			canRetry: err.canRetry,
+			refundNeeded: err.refundNeeded,
+		});
+		return true;
+	}
+	return false;
+}
+
+function validationMessage(err: z.ZodError): string {
+	const first = err.errors[0];
+	return first ? `${first.path.join(".") ? first.path.join(".") + ": " : ""}${first.message}` : "Validation error";
+}
 
 // POST /api/v1/flights/payment-intents
 // First step of checkout: creates a Duffel Payment Intent for the
-// marked-up total. Returns the client_token the frontend needs to render
-// DuffelCardForm -- no card data ever reaches this server.
+// marked-up total and records it in the payment ledger. Returns the
+// client_token the frontend needs to render the card form -- no card data
+// ever reaches this server.
 flightsRouter.post("/payment-intents", authenticate, requireAdminWhileDuffelTest, async (req: AuthenticatedRequest, res: Response) => {
 	try {
-		const { offerId } = paymentIntentSchema.parse(req.body);
-		const intent = await createCheckoutPaymentIntent(offerId);
+		const { offerId, passengers } = paymentIntentSchema.parse(req.body);
+		const intent = await createCheckoutPaymentIntent({ userId: req.user!.id, offerId, passengers });
 		return res.json(intent);
 	} catch (err) {
-		if (err instanceof z.ZodError) return res.status(400).json({ message: "Validation error", errors: err.errors });
+		if (err instanceof z.ZodError) return res.status(400).json({ message: validationMessage(err), errors: err.errors });
+		if (respondToPaymentError(err, res)) return;
 		if (err instanceof Error && err.message.includes("not configured")) {
 			return res.status(503).json({ message: "Flight booking is not yet available" });
-		}
-		if (err instanceof Error && err.message.includes("expired")) {
-			return res.status(409).json({ message: err.message });
 		}
 		if (respondToDuffelError(err, res)) return;
 		console.error(err);
@@ -136,16 +169,17 @@ const confirmPaymentIntentSchema = z.object({
 });
 
 // POST /api/v1/flights/payment-intents/confirm
-// Second step: called once the traveler has submitted their card via
-// DuffelCardForm client-side. Confirms the charge and credits Drift's
-// Balance.
+// Second step: called once the traveler has submitted their card client-side.
+// Confirms the charge and credits Drift's Balance. Only for a payment this
+// user created.
 flightsRouter.post("/payment-intents/confirm", authenticate, requireAdminWhileDuffelTest, async (req: AuthenticatedRequest, res: Response) => {
 	try {
 		const { paymentIntentId } = confirmPaymentIntentSchema.parse(req.body);
-		const result = await confirmCheckoutPaymentIntent(paymentIntentId);
+		const result = await confirmCheckoutPaymentIntent({ userId: req.user!.id, paymentIntentId });
 		return res.json(result);
 	} catch (err) {
-		if (err instanceof z.ZodError) return res.status(400).json({ message: "Validation error", errors: err.errors });
+		if (err instanceof z.ZodError) return res.status(400).json({ message: validationMessage(err), errors: err.errors });
+		if (respondToPaymentError(err, res)) return;
 		if (err instanceof Error && err.message.includes("not configured")) {
 			return res.status(503).json({ message: "Flight booking is not yet available" });
 		}
@@ -155,45 +189,88 @@ flightsRouter.post("/payment-intents/confirm", authenticate, requireAdminWhileDu
 	}
 });
 
-const passengerSchema = z.object({
-	id: z.string().min(1),
-	title: z.enum(["mr", "ms", "mrs", "miss"]),
-	gender: z.enum(["m", "f"]),
-	givenName: z.string().min(1),
-	familyName: z.string().min(1),
-	bornOn: z.string().date(),
-	email: z.string().email(),
-	phoneNumber: z.string().min(6),
-});
-
 const createOrderSchema = z.object({
-	offerId: z.string().min(1),
 	paymentIntentId: z.string().min(1),
-	passengers: z.array(passengerSchema).min(1),
+	// The fare is taken from the payment record, never from the caller. Sent only so a
+	// mismatch can be refused.
+	offerId: z.string().min(1).optional(),
+	// Optional: the passengers given when the payment was created are used otherwise.
+	passengers: z.array(passengerInputSchema).min(1).optional(),
 });
 
 // POST /api/v1/flights/orders
 // Final step: places the actual booking with the supplier, paid from
-// Drift's Balance (funded by the confirmed Payment Intent above).
+// Drift's Balance. Refuses unless the payment is recorded, belongs to this
+// user, is confirmed paid and has not already been used (a repeat call
+// returns the same booking).
 flightsRouter.post("/orders", authenticate, requireAdminWhileDuffelTest, async (req: AuthenticatedRequest, res: Response) => {
 	try {
 		const body = createOrderSchema.parse(req.body);
-		const order = await createFlightOrder({
-			userId: req.user!.id,
-			duffelOfferId: body.offerId,
-			paymentIntentId: body.paymentIntentId,
-			passengers: body.passengers,
-		});
+		const order = await placeOrder({ userId: req.user!.id, paymentIntentId: body.paymentIntentId, offerId: body.offerId, passengers: body.passengers });
 		return res.status(201).json(order);
 	} catch (err) {
-		if (err instanceof z.ZodError) return res.status(400).json({ message: "Validation error", errors: err.errors });
+		if (err instanceof z.ZodError) return res.status(400).json({ message: validationMessage(err), errors: err.errors });
+		if (respondToPaymentError(err, res)) return;
 		if (err instanceof Error && err.message.includes("not configured")) {
 			return res.status(503).json({ message: "Flight booking is not yet available" });
 		}
-		if (err instanceof Error && err.message.includes("expired")) {
-			return res.status(409).json({ message: err.message });
-		}
 		if (respondToDuffelError(err, res)) return;
+		console.error(err);
+		return res.status(500).json({ message: "Internal server error" });
+	}
+});
+
+// GET /api/v1/flights/payments/pending
+// Payments the traveller has made that have not become a booking (yet), so a closed
+// browser or a failed order never leaves them wondering where their money is.
+flightsRouter.get("/payments/pending", authenticate, async (req: AuthenticatedRequest, res: Response) => {
+	try {
+		return res.json({ payments: await listOpenPayments(req.user!.id) });
+	} catch (err) {
+		console.error(err);
+		return res.status(500).json({ message: "Internal server error" });
+	}
+});
+
+// POST /api/v1/flights/payments/:paymentIntentId/retry
+// Try placing the booking again for a payment that is already made. No new charge.
+flightsRouter.post("/payments/:paymentIntentId/retry", authenticate, requireAdminWhileDuffelTest, async (req: AuthenticatedRequest, res: Response) => {
+	try {
+		const passengers = z.object({ passengers: z.array(passengerInputSchema).min(1).optional() }).parse(req.body ?? {}).passengers;
+		const order = await placeOrder({ userId: req.user!.id, paymentIntentId: req.params.paymentIntentId, passengers });
+		return res.status(200).json(order);
+	} catch (err) {
+		if (err instanceof z.ZodError) return res.status(400).json({ message: validationMessage(err), errors: err.errors });
+		if (respondToPaymentError(err, res)) return;
+		if (respondToDuffelError(err, res)) return;
+		console.error(err);
+		return res.status(500).json({ message: "Internal server error" });
+	}
+});
+
+// POST /api/v1/flights/payments/:paymentIntentId/refund-request
+// The traveller asks for their payment back. Refunds are done by a person in the Duffel
+// dashboard (the Duffel SDK has no refund call), so this marks the payment and alerts the owner.
+flightsRouter.post("/payments/:paymentIntentId/refund-request", authenticate, requireAdminWhileDuffelTest, async (req: AuthenticatedRequest, res: Response) => {
+	try {
+		await requestRefund(req.user!.id, req.params.paymentIntentId);
+		return res.json({ ok: true, message: "Refund requested. We will refund your payment in full." });
+	} catch (err) {
+		if (respondToPaymentError(err, res)) return;
+		console.error(err);
+		return res.status(500).json({ message: "Internal server error" });
+	}
+});
+
+// POST /api/v1/flights/payments/:paymentIntentId/mark-refunded  (admin)
+// Records that the refund has been done in the Duffel dashboard.
+flightsRouter.post("/payments/:paymentIntentId/mark-refunded", authenticate, async (req: AuthenticatedRequest, res: Response) => {
+	try {
+		if (req.user!.role !== "admin") return res.status(403).json({ message: "Admin only" });
+		await markRefunded(req.params.paymentIntentId);
+		return res.json({ ok: true });
+	} catch (err) {
+		if (respondToPaymentError(err, res)) return;
 		console.error(err);
 		return res.status(500).json({ message: "Internal server error" });
 	}

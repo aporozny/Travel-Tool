@@ -62,3 +62,31 @@ Note: the reviewer *email* will not arrive while SendGrid is out of credits; the
 Tests: `backend/scripts/operator-fixes-api-test.js` (59 checks, all passing, cleans up after itself). Also checked in a real browser on the live site: a reload keeps the operator and admin menus, the operator Bookings tab lists the booking and Confirm works, `/admin` loads.
 
 Found by the browser check and fixed before finishing: the operator's Bookings item first stayed on the Overview tab because React reused the same screen (fixed with a `key`).
+
+
+## Duffel checkout: charged with no booking, fixed 22 Sep (D-E-4, and a worse problem found while fixing it)
+
+**What the test plan recorded (D-E-4):** if the order step failed after the card was charged, the screen went back to the card form, paying again could not work, and there was no retry.
+
+**What reading the code showed was worse:** the server kept no record of any payment. The browser held the only link between "the traveller paid" and "place the order", and `POST /flights/orders` never checked the payment at all: it trusted whatever `paymentIntentId` the caller sent, while the order is paid from **Drift's own Duffel Balance**. So once the Duffel key is live, anyone could have called that route with a made-up payment id and been booked at Drift's expense. (It was safe only because the route is admin-only while the key is a test key.)
+
+**Fix (migration 045, `services/flightPayments.ts`, `services/flightPaymentRules.ts`):**
+
+| Before | Now |
+|---|---|
+| No record of a payment | Every payment intent is recorded in `flight_payments` when it is created (user, fare, amount, status) |
+| Order placed for any payment id | An order needs a payment that is recorded, belongs to that user, is for that fare, was confirmed paid, and is unused. Made-up or someone else's id is a 404 |
+| Fare taken from the caller | The fare comes from the payment record; a mismatch is refused |
+| Two clicks could double-book | The payment is claimed atomically; a repeat call returns the same booking; one order per payment is enforced by a unique index |
+| Bad phone or passenger list found only after the card was charged | Passengers are validated (and kept) when the payment is created, before the card step |
+| Order fails after payment: dead end | The screen says the payment is safe, offers **Try again** (no new charge) and **Ask for a refund**; retries are limited to 3 |
+| Fare rose above what the card paid | Nothing is booked at a loss; a refund is needed |
+| Airline booked it but our recording failed | The order id is kept; a retry finishes recording and never books twice |
+| Nobody told | The owner is alerted immediately (SMS as well when a person must act), and a 5-minute reconciler catches payments that sat unfinished (closed browser, server died mid-order, card captured but never confirmed) |
+| Closed the browser | "A payment needs attention" panel on the Flights and Bookings pages |
+
+**Refunds are still manual.** The Duffel SDK has no refund call for card payments, so a refund is done in the Duffel dashboard and then recorded with `POST /api/v1/flights/payments/:id/mark-refunded` (admin). The alert email says exactly this.
+
+**Tests:** `tests/flightPaymentRules.test.ts` (17, run in CI) and `backend/scripts/flight-payments-api-test.js` (72 checks against the real database with a fake Duffel and a fake alert channel: happy path, double submit, every failure kind, retry limit, price change, unrecorded order, reconciler, and the HTTP routes). Older suites re-run with no regressions.
+
+**Not verified end to end:** the real Stripe card step and a real Duffel confirm/order, which need a browser and a Duffel test payment. Everything on our side of those two calls is tested.

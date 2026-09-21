@@ -5,7 +5,6 @@ import type { Offer } from "@duffel/api/booking/Offers/OfferTypes";
 import crypto from "crypto";
 import { pool } from "../utils/db";
 import { getDuffelClient as getClient } from "../utils/duffelClient";
-import { notifyOrderChanged } from "./tripNotifications";
 
 // Flight search/booking via Duffel. Ships inactive: every function below
 // throws a clear "not configured" error until DUFFEL_API_KEY is set --
@@ -143,7 +142,7 @@ export function computeMarkup(baseAmount: number, rule: MarkupRule): { totalAmou
 // does NOT use this -- fetching the rule fresh per offer in a loop of
 // potentially dozens of offers was the actual cause of ~20s search times
 // (N sequential DB round trips); it fetches the rule once instead.
-async function applyMarkup(baseAmount: number): Promise<{ totalAmount: number; markupAmount: number; ruleId: string }> {
+export async function applyMarkup(baseAmount: number): Promise<{ totalAmount: number; markupAmount: number; ruleId: string }> {
 	const rule = await getActiveMarkupRule();
 	return computeMarkup(baseAmount, rule);
 }
@@ -258,152 +257,13 @@ export async function reverifyOffer(duffelOfferId: string): Promise<Offer> {
 	return response.data;
 }
 
-// Checkout: Payment Intent -> Balance -> Order. Chosen over the other two
-// Duffel payment methods after reading their docs directly (see
-// RISK-REGISTER.md R12) -- plain Card passthrough forbids any markup
-// (must charge the exact supplier price), and plain pre-funded Balance
-// would require Drift to run its own separate Stripe-style processor to
-// charge the traveler. Payment Intents let Duffel's own hosted card form
-// charge the traveler the marked-up total directly, crediting Drift's
-// Balance (minus Duffel's processing fee) before the order is placed --
-// so raw card data never touches Drift's servers (PCI scope stays SAQ-A)
-// and no second payment processor is needed.
-
-export interface PaymentIntentView {
-	id: string;
-	clientToken: string;
-	amount: string;
-	currency: string;
-	status: string | null;
-}
-
-// Amount charged to the traveler's card -- the marked-up total, not
-// Duffel's raw price. Re-verifies the offer first since prices/expiry
-// are live at Duffel, never trusted from the search-time cache.
-export async function createCheckoutPaymentIntent(duffelOfferId: string): Promise<PaymentIntentView> {
-	const duffel = getClient();
-	const offer = await reverifyOffer(duffelOfferId);
-	if (new Date(offer.expires_at) < new Date()) {
-		throw new Error("This fare has expired -- please search again");
-	}
-	const baseAmount = parseFloat(offer.base_amount) + (offer.tax_amount ? parseFloat(offer.tax_amount) : 0);
-	const { totalAmount } = await applyMarkup(baseAmount);
-
-	const response = await duffel.paymentIntents.create({
-		amount: totalAmount.toFixed(2),
-		currency: offer.total_currency,
-	});
-	return {
-		id: response.data.id,
-		clientToken: response.data.client_token,
-		amount: response.data.amount,
-		currency: response.data.currency,
-		status: response.data.status,
-	};
-}
-
-// Called once the traveler has submitted their card via Duffel's hosted
-// DuffelCardForm component (client-side, using this Payment Intent's
-// client_token) -- confirms the charge and credits Drift's Balance.
-export async function confirmCheckoutPaymentIntent(paymentIntentId: string): Promise<{ status: string | null; netAmount: string | null }> {
-	const duffel = getClient();
-	const response = await duffel.paymentIntents.confirm(paymentIntentId);
-	return { status: response.data.status, netAmount: response.data.net_amount };
-}
-
-export interface CheckoutPassengerInput {
-	id: string; // must match one of Offer.passengers[].id
-	title: "mr" | "ms" | "mrs" | "miss";
-	gender: "m" | "f";
-	givenName: string;
-	familyName: string;
-	bornOn: string; // YYYY-MM-DD
-	email: string;
-	phoneNumber: string; // E.164, e.g. +61412345678
-}
-
-// Places the actual booking against the supplier, paid from Drift's
-// Balance (funded moments earlier by the confirmed Payment Intent above).
-// Re-verifies the offer again immediately before booking -- the Payment
-// Intent step and this step are two separate round trips to the
-// traveler's bank, so the fare could theoretically have moved or expired
-// in between.
-export async function createFlightOrder(params: {
-	userId: string;
-	duffelOfferId: string;
-	passengers: CheckoutPassengerInput[];
-	paymentIntentId: string;
-}): Promise<{ id: string; bookingReference: string; status: string }> {
-	const duffel = getClient();
-	const offer = await reverifyOffer(params.duffelOfferId);
-	if (new Date(offer.expires_at) < new Date()) {
-		throw new Error("This fare has expired -- please search again");
-	}
-
-	const baseAmount = parseFloat(offer.base_amount) + (offer.tax_amount ? parseFloat(offer.tax_amount) : 0);
-	const { totalAmount, markupAmount, ruleId } = await applyMarkup(baseAmount);
-
-	const orderPassengers = params.passengers.map((p) => {
-		const offerPassenger = offer.passengers.find((op) => op.id === p.id);
-		if (!offerPassenger) throw new Error(`Passenger id ${p.id} not found on offer ${offer.id}`);
-		return {
-			id: p.id,
-			title: p.title,
-			gender: p.gender,
-			given_name: p.givenName,
-			family_name: p.familyName,
-			born_on: p.bornOn,
-			email: p.email,
-			phone_number: p.phoneNumber,
-			type: offerPassenger.type ?? "adult",
-		};
-	});
-
-	const orderResponse = await duffel.orders.create({
-		selected_offers: [offer.id],
-		passengers: orderPassengers as any,
-		payments: [{ type: "balance", amount: offer.total_amount, currency: offer.total_currency }],
-		type: "instant",
-		metadata: { payment_intent_id: params.paymentIntentId },
-	});
-	const order = orderResponse.data;
-
-	const { rows } = await pool.query(
-		`INSERT INTO flight_orders
-		   (user_id, duffel_order_id, source_offer_id, booking_reference, status, slices,
-		    duffel_cost_amount, duffel_cost_currency, price_charged_amount, price_charged_currency,
-		    markup_amount, markup_rule_id, payment_intent_id)
-		 VALUES ($1,$2,$3,$4,'confirmed',$5,$6,$7,$8,$9,$10,$11,$12)
-		 RETURNING id, booking_reference, status`,
-		[
-			params.userId,
-			order.id,
-			offer.id,
-			order.booking_reference,
-			JSON.stringify(order.slices),
-			baseAmount,
-			offer.total_currency,
-			totalAmount,
-			offer.total_currency,
-			markupAmount,
-			ruleId,
-			params.paymentIntentId,
-		]
-	);
-	const flightOrderRow = rows[0];
-
-	for (const p of orderPassengers) {
-		await pool.query(
-			`INSERT INTO flight_order_passengers
-			   (flight_order_id, duffel_passenger_id, title, given_name, family_name, date_of_birth, gender)
-			 VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-			[flightOrderRow.id, p.id, p.title, p.given_name, p.family_name, p.born_on, p.gender]
-		);
-	}
-
-	notifyOrderChanged("duffel", flightOrderRow.id);
-	return { id: flightOrderRow.id, bookingReference: flightOrderRow.booking_reference, status: flightOrderRow.status };
-}
+// Checkout (payment intent -> confirm -> order) lives in flightPayments.ts, which records
+// every payment in the flight_payments ledger. The reasoning for choosing Duffel Payment
+// Intents over the other two payment methods (see RISK-REGISTER.md R12) is unchanged:
+// plain Card passthrough forbids any markup, and plain pre-funded Balance would need a
+// second card processor. Payment Intents let Duffel's hosted card form charge the traveller
+// the marked-up total directly, crediting Drift's Balance before the order is placed, so raw
+// card data never touches Drift's servers (PCI scope stays SAQ-A).
 
 export interface FlightOrderSummaryView {
 	id: string;
