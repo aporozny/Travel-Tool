@@ -62,7 +62,8 @@ interface TravelportCatalogProductOffering {
 interface CatalogProductOfferingsResponse {
 	CatalogProductOfferingsResponse: {
 		CatalogProductOfferings?: { CatalogProductOffering: TravelportCatalogProductOffering[] };
-		ReferenceList: ({ "@type": "ReferenceListFlight"; Flight: TravelportFlightDetail[] } | { "@type": string; [key: string]: unknown })[];
+		// Absent (not just empty) when every source failed or found nothing for the route/date -- see Result.Error in that case.
+		ReferenceList?: ({ "@type": "ReferenceListFlight"; Flight: TravelportFlightDetail[] } | { "@type": string; [key: string]: unknown })[];
 	};
 }
 
@@ -164,10 +165,10 @@ export async function searchTravelportFlights(params: FlightSearchParams): Promi
 	const data = response.CatalogProductOfferingsResponse;
 	const offerings = data.CatalogProductOfferings?.CatalogProductOffering ?? [];
 
-	const flightList = data.ReferenceList.find((r) => r["@type"] === "ReferenceListFlight") as
+	const flightList = data.ReferenceList?.find((r) => r["@type"] === "ReferenceListFlight") as
 		| { Flight: TravelportFlightDetail[] }
 		| undefined;
-	const productList = data.ReferenceList.find((r) => r["@type"] === "ReferenceListProduct") as
+	const productList = data.ReferenceList?.find((r) => r["@type"] === "ReferenceListProduct") as
 		| { Product: TravelportProduct[] }
 		| undefined;
 
