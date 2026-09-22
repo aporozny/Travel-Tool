@@ -29,6 +29,7 @@ import { tripsRouter } from './routes/trips';
 import { flightsRouter } from './routes/flights';
 import { staysRouter } from './routes/stays';
 import { tripgicRouter } from './routes/tripgic';
+import { webhooksRouter } from './routes/webhooks';
 import { currenciesRouter } from './routes/currencies';
 import { notificationsRouter } from './routes/notifications';
 import { startNotificationWorker } from './services/tripNotificationWorker';
@@ -55,6 +56,11 @@ app.use(cors({
 // text). Parse that one route with a bigger limit first; body-parser skips a
 // request it has already parsed, so every other route keeps the small limit.
 app.use('/api/v1/community/upload', express.json({ limit: '14mb' }));
+// Duffel signs the exact raw bytes of the webhook body (see
+// services/duffelWebhooks.ts) -- same override trick as the photo upload
+// line above, so this route keeps its body unparsed ahead of the general
+// JSON parser below.
+app.use('/api/v1/webhooks/duffel', express.raw({ type: 'application/json' }));
 app.use(express.json({ limit: '10kb' })); // prevent large payload attacks
 app.use(morgan(process.env.NODE_ENV === 'test' ? 'silent' : 'dev'));
 
@@ -93,6 +99,7 @@ app.use('/api/v1/trips', tripsRouter);
 app.use('/api/v1/flights', flightsRouter);
 app.use('/api/v1/stays', staysRouter);
 app.use('/api/v1/tripgic', tripgicRouter);
+app.use('/api/v1/webhooks', webhooksRouter);
 app.use('/api/v1/currencies', currenciesRouter);
 app.use('/api/v1/notifications', notificationsRouter);
 
