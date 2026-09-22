@@ -1,6 +1,6 @@
 import { pool } from "../utils/db";
 import { getDuffelClient, isDuffelTestMode } from "../utils/duffelClient";
-import { reverifyOffer, applyMarkup } from "./flights";
+import { reverifyOffer, applyMarkup, routeOfOffer } from "./flights";
 import { notifyOrderChanged } from "./tripNotifications";
 import { sendReviewerAlert } from "./notifications";
 import {
@@ -106,7 +106,7 @@ export async function createCheckoutPaymentIntent(params: { userId: string; offe
 	}
 
 	const baseAmount = parseFloat(offer.base_amount) + (offer.tax_amount ? parseFloat(offer.tax_amount) : 0);
-	const { totalAmount } = await applyMarkup(baseAmount);
+	const { totalAmount } = await applyMarkup(baseAmount, routeOfOffer(offer));
 
 	const response = await duffel.paymentIntents.create({ amount: totalAmount.toFixed(2), currency: offer.total_currency });
 	await pool.query(
@@ -203,7 +203,7 @@ async function performOrder(row: PaymentRow): Promise<PlacedOrder> {
 	if (new Date(offer.expires_at) < new Date()) throw new OrderPlacementError("fare_expired");
 
 	const baseAmount = parseFloat(offer.base_amount) + (offer.tax_amount ? parseFloat(offer.tax_amount) : 0);
-	const { totalAmount, markupAmount, ruleId } = await applyMarkup(baseAmount);
+	const { totalAmount, markupAmount, ruleId } = await applyMarkup(baseAmount, routeOfOffer(offer));
 	// The card was charged the price shown at checkout. If the fare has moved above that, do
 	// not book at a loss: refund instead.
 	if (!paymentCoversPrice(parseFloat(row.amount), totalAmount)) throw new OrderPlacementError("price_changed");

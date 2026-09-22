@@ -5,6 +5,7 @@ import type { Offer } from "@duffel/api/booking/Offers/OfferTypes";
 import crypto from "crypto";
 import { pool } from "../utils/db";
 import { getDuffelClient as getClient } from "../utils/duffelClient";
+import { pickEffectiveRule } from "./markupSelection";
 
 // Flight search/booking via Duffel. Ships inactive: every function below
 // throws a clear "not configured" error until DUFFEL_API_KEY is set --
@@ -109,11 +110,10 @@ function searchKeyFor(params: FlightSearchParams): string {
 	return crypto.createHash("sha256").update(normalized).digest("hex");
 }
 
-// Active markup rule, applied to a base Duffel price. Global-scope only
-// for now -- route/cabin_class-scoped rules exist in the schema but
-// aren't selected here yet, since no product decision on differentiated
-// pricing has been made (see markup_rules' seed row: 8%, $5-150 cap,
-// explicitly a placeholder).
+// Active markup rule, applied to a base Duffel price. The seed row (8%, $5-150 cap) is a
+// placeholder for the whole account (scope 'global'); a route can now override it with its own
+// rule (scope 'route') -- see services/markupRules.ts for managing those, and
+// services/markupSelection.ts for the (pure, tested) rule which wins when both exist.
 export interface MarkupRule {
 	id: string;
 	markup_type: string;
@@ -122,12 +122,28 @@ export interface MarkupRule {
 	max_fee: string | null;
 }
 
-export async function getActiveMarkupRule(): Promise<MarkupRule> {
-	const { rows } = await pool.query(
-		`SELECT id, markup_type, markup_value, min_fee, max_fee FROM markup_rules WHERE scope = 'global' AND active = true LIMIT 1`
-	);
-	if (!rows.length) throw new Error("No active global markup_rules row -- flight pricing cannot be calculated");
-	return rows[0];
+// The outbound leg's own origin/destination, e.g. SYD/DPS for a Sydney-Bali return -- never
+// derived from a multi-slice itinerary's first-origin-to-last-destination, which for any round
+// trip is just back to the start airport. Used everywhere a route-scoped markup rule is looked up.
+export interface FlightRoute {
+	origin: string;
+	destination: string;
+}
+
+const ROUTE_RULE_COLUMNS = "id, markup_type, markup_value, min_fee, max_fee, scope, route_origin, route_destination";
+
+export async function getActiveMarkupRule(route?: FlightRoute): Promise<MarkupRule> {
+	const globalRow = (await pool.query(`SELECT ${ROUTE_RULE_COLUMNS} FROM markup_rules WHERE scope = 'global' AND active = true LIMIT 1`)).rows[0] ?? null;
+	let routeRow = null;
+	if (route) {
+		routeRow = (await pool.query(
+			`SELECT ${ROUTE_RULE_COLUMNS} FROM markup_rules WHERE scope = 'route' AND active = true AND route_origin = $1 AND route_destination = $2 LIMIT 1`,
+			[route.origin, route.destination]
+		)).rows[0] ?? null;
+	}
+	const rule = pickEffectiveRule({ global: globalRow, route: routeRow }, route ?? null);
+	if (!rule) throw new Error("No active global markup_rules row -- flight pricing cannot be calculated");
+	return rule;
 }
 
 export function computeMarkup(baseAmount: number, rule: MarkupRule): { totalAmount: number; markupAmount: number; ruleId: string } {
@@ -142,9 +158,17 @@ export function computeMarkup(baseAmount: number, rule: MarkupRule): { totalAmou
 // does NOT use this -- fetching the rule fresh per offer in a loop of
 // potentially dozens of offers was the actual cause of ~20s search times
 // (N sequential DB round trips); it fetches the rule once instead.
-export async function applyMarkup(baseAmount: number): Promise<{ totalAmount: number; markupAmount: number; ruleId: string }> {
-	const rule = await getActiveMarkupRule();
+export async function applyMarkup(baseAmount: number, route?: FlightRoute): Promise<{ totalAmount: number; markupAmount: number; ruleId: string }> {
+	const rule = await getActiveMarkupRule(route);
 	return computeMarkup(baseAmount, rule);
+}
+
+// The route a Duffel offer's outbound slice represents, for a route-scoped markup lookup.
+export function routeOfOffer(offer: Pick<Offer, "slices">): FlightRoute | undefined {
+	const first = offer.slices?.[0];
+	const origin = first?.origin?.iata_code;
+	const destination = first?.destination?.iata_code;
+	return origin && destination ? { origin, destination } : undefined;
 }
 
 // The offers returned inline on an OfferRequest are typed
@@ -201,7 +225,7 @@ export async function searchFlights(params: FlightSearchParams): Promise<FlightO
 	// search time regardless; they get resnapshotted at order creation,
 	// since the markup that matters is the one active when the traveler
 	// actually books, not when they searched.
-	const rule = await getActiveMarkupRule();
+	const rule = await getActiveMarkupRule({ origin: params.origin, destination: params.destination });
 
 	// Independent per-offer cache writes -- run concurrently instead of
 	// one at a time. With Duffel test mode routinely returning dozens of

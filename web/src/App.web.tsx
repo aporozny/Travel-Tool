@@ -7,9 +7,15 @@ import AppShell from './screens/AppShell.web';
 import OnboardingScreen from './screens/OnboardingScreen.web';
 import api from './services/api.web';
 import AdminWaitlist from './screens/AdminWaitlist.web';
+import AdminPricing from './screens/AdminPricing.web';
 import ErrorBoundary from './components/ErrorBoundary.web';
 
 function AdminWrapper() {
+  // /admin/pricing is checked first: startsWith('/admin') would otherwise also match it and
+  // always render AdminWaitlist instead.
+  if (window.location.pathname.startsWith('/admin/pricing')) {
+    return <AdminPricing />;
+  }
   if (window.location.pathname.startsWith('/admin')) {
     return <AdminWaitlist />;
   }

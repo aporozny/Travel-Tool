@@ -169,6 +169,6 @@ export async function searchTripgicFlights(params: FlightSearchParams): Promise<
 	}
 
 	const logoBaseUrl = response.resources?.base_url?.carrier;
-	const rule = await getActiveMarkupRule();
+	const rule = await getActiveMarkupRule({ origin: params.origin, destination: params.destination });
 	return (response.data ?? []).map((offer) => toOfferView(offer, params.adults, logoBaseUrl, rule));
 }

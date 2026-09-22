@@ -2,7 +2,7 @@ import { pool } from "../utils/db";
 import { redis } from "../utils/redis";
 import { tripgicPost, tripgicMemberId } from "../utils/tripgicClient";
 import { syncHeldOrder, expireOverdueHeld, refreshOverdueForUser, refreshUserHeldOrders, recordSupplierStatus } from "./tripgicOrderSync";
-import { getActiveMarkupRule, computeMarkup, type FlightSliceView } from "./flights";
+import { getActiveMarkupRule, computeMarkup, type FlightSliceView, type FlightRoute } from "./flights";
 import { mapTripgicSlices } from "./tripgicFlights";
 import { buildOccupancies } from "./tripgicStays";
 import { notifyOrderChanged } from "./tripNotifications";
@@ -76,8 +76,8 @@ interface TripgicResult {
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
-async function price(cost: number): Promise<{ charged: number; markup: number; ruleId: string }> {
-	const rule = await getActiveMarkupRule();
+async function price(cost: number, route?: FlightRoute): Promise<{ charged: number; markup: number; ruleId: string }> {
+	const rule = await getActiveMarkupRule(route);
 	const { totalAmount, markupAmount, ruleId } = computeMarkup(cost, rule);
 	return { charged: round2(totalAmount), markup: round2(markupAmount), ruleId };
 }
@@ -189,14 +189,18 @@ export async function quoteTripgicFlight(userId: string, offerId: string): Promi
 	const slices: FlightSliceView[] = mapTripgicSlices(offer.flight_group ?? []);
 	if (!slices.length) throw new BookingError("This fare is no longer available -- please search again", 409, "fare_unavailable");
 
-	const cost = Number(v.validation_price.amount);
-	const searched = Number(v.search_price?.amount ?? cost);
-	const now = await price(cost);
-	const before = round2((await price(searched)).charged);
-	const priceChanged = round2(cost) !== round2(searched);
-
 	const first = slices[0];
 	const last = slices[slices.length - 1];
+	// The outbound leg's own origin/destination -- for a return trip this is first.origin to
+	// first.destination (e.g. SYD to DPS), the same convention routeOfOffer() uses for Duffel.
+	const flightRoute = { origin: first.originAirport, destination: first.destinationAirport };
+
+	const cost = Number(v.validation_price.amount);
+	const searched = Number(v.search_price?.amount ?? cost);
+	const now = await price(cost, flightRoute);
+	const before = round2((await price(searched, flightRoute)).charged);
+	const priceChanged = round2(cost) !== round2(searched);
+
 	const route = slices.length > 1 ? `${first.originAirport} to ${first.destinationAirport} and back` : `${first.originAirport} to ${last.destinationAirport}`;
 	const dates = slices.length > 1 ? `${dateOnly(first.departingAt)} / ${dateOnly(last.departingAt)}` : dateOnly(first.departingAt);
 
