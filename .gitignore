@@ -38,3 +38,6 @@ coverage/
 # Playwright CLI debug snapshots
 .playwright-cli/
 web/explore.yml
+
+# Stray Python virtualenv that ended up tracked under web/ (3440 files, 145MB) -- untracked 2026-09-22.
+web/myenv/
