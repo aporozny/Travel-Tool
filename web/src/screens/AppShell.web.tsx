@@ -7,6 +7,7 @@ import api from '../services/api.web';
 import BookingsScreen from './BookingsScreen.web';
 import SafetyScreen from './SafetyScreen.web';
 import ProfileScreen from './ProfileScreen.web';
+import OperatorProfileScreen from './OperatorProfileScreen.web';
 import DashboardScreen from './DashboardScreen.web';
 import MembersScreen from './MembersScreen.web';
 import MessagesScreen from './MessagesScreen.web';
@@ -95,7 +96,10 @@ export default function AppShell() {
       // (the keys make React start a fresh screen on the right tab when switching between the two menu items)
       case 'bookings':  return isOperator ? <DashboardScreen key="bookings" initialTab="bookings" /> : <BookingsScreen />;
       case 'safety':    return <SafetyScreen />;
-      case 'profile':   return <ProfileScreen />;
+      // Operators get no `travelers` row at all, so the traveller Profile screen (GET
+      // /travelers/me) would 404 and spin on "Loading..." forever (D-A-3) -- their own
+      // business listing lives on a different screen.
+      case 'profile':   return isOperator ? <OperatorProfileScreen /> : <ProfileScreen />;
       case 'members':   return <MembersScreen />;
       case 'messages':  return <MessagesScreen />;
       case 'dashboard': return <DashboardScreen key="dashboard" />;

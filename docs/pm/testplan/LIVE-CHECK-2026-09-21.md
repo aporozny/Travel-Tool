@@ -118,3 +118,22 @@ Found by the browser check and fixed before finishing: the operator's Bookings i
 **Also fixed:** `auth.test.ts` and `operators.test.ts` failed their cleanup against the live database (the new consent-records table blocks deleting their temporary users), leaving `@example.com` users behind. CI did not show it because CI's older schema has no such table. They now clear consent records first. Five leftover users from two suite runs were removed.
 
 **Still true:** the words TripGic uses for a ticketed booking are unconfirmed until a booking is actually ticketed (the wallet has never been funded). After it is, run one `issue-ticket`, then read `supplier_status` and tighten `tripgicStatus.ts`.
+
+
+## Operators had no way to create a business listing, fixed 22 Sep (D-A-3, D-DSH-08)
+
+**What was actually broken:** `POST /auth/register` only creates a `travelers` row for role `traveler`. An operator account gets **no profile row of any kind** -- confirmed live: two real accounts (`jporozny@hotmail.com`, `operators@drifttravel.app`) have neither an `operators` row nor a `travelers` row, exactly what a fresh registration produces today. The consequences, both already in the test plan:
+- **D-A-3:** the Profile tab is shown to operators but calls `GET /travelers/me`, which 404s for them, so it shows "Loading..." forever.
+- **D-DSH-08:** the Dashboard says "No operator profile found. Create your listing first." with no button anywhere to do that.
+
+There was no operator claim-listing button either (D-B-5), but that was secondary: without a way to create or claim a listing at all, a brand-new operator account was a dead end past login.
+
+**Fix:**
+- New `GET /api/v1/operators/me`: the signed-in operator's own listing, or a clean 404 if they have not created one.
+- `web/src/screens/OperatorProfileScreen.web.tsx`: replaces the traveller Profile screen for operator accounts (`AppShell.web.tsx`). Shows a create form when there is no listing (`POST /operators`), an editable view once one exists (`PATCH /operators/:id`), and the claim-an-existing-catalogue-listing flow underneath (search via `GET /operators/search-places`, submit via `POST /operators/claims`, own claims via `GET /operators/claims` -- all already working from the earlier claims fix). A bare domain typed into Website is completed to a full URL before it is sent, since the API requires one.
+
+**Verified with a real, throwaway operator account with no operators row (the exact scenario), in the live browser:** Profile showed the create prompt instead of spinning; created a listing; it appeared correctly, including the completed website URL; the Dashboard, unreachable before, now shows the new listing (0 bookings, correctly empty); searched the real catalogue, claimed an unclaimed real place ("Debbie's"), saw it move to "Claim pending" and appear under "Your claims". Everything created by the check was removed afterwards, including the claim, so the catalogue place is unclaimed again.
+
+**Tests:** `backend/scripts/operator-listing-api-test.js` (18 checks: no-listing 404, role checks, validation, create, duplicate-create refused, edit, ownership, two operators kept separate). The earlier `operator-fixes-api-test.js` (59 checks, claims/dashboard) re-run with no regressions.
+
+**Not done:** there is still no in-app way to fix the two real accounts named above -- the owner can now do that themselves by signing in as each and using Profile > Create your listing, once they have the login details. Nothing was created or changed for either account by this fix.

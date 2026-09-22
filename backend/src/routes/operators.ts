@@ -199,6 +199,35 @@ operatorsRouter.patch('/claims/:id', authenticate, async (req: AuthenticatedRequ
   }
 });
 
+// GET /api/v1/operators/me
+// The signed-in operator's own business listing, or 404 if they have not created one yet
+// (registration gives an operator account no operators row -- there is nothing to show
+// until they do). Declared before /:id so "me" is never read as an operator id.
+operatorsRouter.get('/me', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (req.user!.role !== 'operator') {
+      return res.status(403).json({ message: 'Operators only' });
+    }
+    const result = await pool.query(
+      `SELECT o.id, o.business_name, o.description, o.category, o.website,
+              o.phone, o.address, o.region, o.country, o.tier, o.is_verified,
+              o.created_at,
+              ST_X(o.location::geometry) AS longitude,
+              ST_Y(o.location::geometry) AS latitude
+       FROM operators o
+       WHERE o.user_id = $1`,
+      [req.user!.id]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'No business listing yet' });
+    }
+    return res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
 // GET /api/v1/operators/:id
 // Public - get single operator
 operatorsRouter.get('/:id', async (req: AuthenticatedRequest, res: Response) => {
