@@ -92,12 +92,19 @@ export default function StaysScreen() {
     const isStale = () => token !== searchToken.current;
     try {
       let res = await api.post('/stays/tripgic-search', payload, { timeout: 30000 });
+      // The poll response's body is just {status, ...}, it never echoes the
+      // search id back -- reading it from `res` on each loop iteration goes
+      // to undefined after the first poll, so every later poll 400s and the
+      // whole extended search reports "failed" (confirmed live: every
+      // search that didn't finish within the first ~3s poll interval hit
+      // this, effectively always for TripGic's real ~40s search time).
+      const { searchId } = res.data;
       const deadline = Date.now() + EXTRA_POLL_MAX_MS;
       while (res.data.status === 'pending' || res.data.status === 'unknown') {
         if (Date.now() > deadline) throw new Error('timed out');
         await new Promise((resolve) => setTimeout(resolve, EXTRA_POLL_INTERVAL_MS));
         if (isStale()) return;
-        res = await api.get(`/stays/tripgic-search/${res.data.searchId}`, { timeout: 30000 });
+        res = await api.get(`/stays/tripgic-search/${searchId}`, { timeout: 30000 });
       }
       if (isStale()) return;
       if (res.data.status === 'ready') {
