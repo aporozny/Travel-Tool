@@ -428,6 +428,12 @@ export default function FlightsScreen() {
   const [tripType, setTripType] = useState<'roundtrip' | 'oneway' | 'mix'>('roundtrip');
   const [origin, setOrigin] = useState('');
   const [destination, setDestination] = useState('');
+  // A browser restoring these fields' text on reload (session/form history)
+  // doesn't fire a React change event, so the boxes can look filled while
+  // `origin`/`destination` state is still '' -- handleSearch reads the DOM
+  // directly through these refs instead of trusting state alone.
+  const originInputRef = useRef<HTMLInputElement>(null);
+  const destinationInputRef = useRef<HTMLInputElement>(null);
   const [departureDate, setDepartureDate] = useState('');
   const [returnDate, setReturnDate] = useState('');
   const [adults, setAdults] = useState(1);
@@ -483,7 +489,15 @@ export default function FlightsScreen() {
   };
 
   const handleSearch = async () => {
-    if (origin.length !== 3 || destination.length !== 3) {
+    // Read the boxes themselves, not just state: a browser restoring these
+    // fields' text on reload doesn't fire a React change event, so state can
+    // still be '' while the fields visibly show a valid-looking code.
+    const liveOrigin = (originInputRef.current?.value ?? origin).toUpperCase();
+    const liveDestination = (destinationInputRef.current?.value ?? destination).toUpperCase();
+    if (liveOrigin !== origin) setOrigin(liveOrigin);
+    if (liveDestination !== destination) setDestination(liveDestination);
+
+    if (liveOrigin.length !== 3 || liveDestination.length !== 3) {
       setError('Enter valid 3-letter airport codes (e.g. SYD, LHR).');
       return;
     }
@@ -500,8 +514,8 @@ export default function FlightsScreen() {
         // Two one-way searches: the outbound, and the return as its own trip.
         const common = { adults, cabinClass };
         const [out, back] = await Promise.all([
-          api.post('/flights/search', { origin: origin.toUpperCase(), destination: destination.toUpperCase(), departureDate, ...common }, { timeout: 30000 }),
-          api.post('/flights/search', { origin: destination.toUpperCase(), destination: origin.toUpperCase(), departureDate: returnDate, ...common }, { timeout: 30000 }),
+          api.post('/flights/search', { origin: liveOrigin, destination: liveDestination, departureDate, ...common }, { timeout: 30000 }),
+          api.post('/flights/search', { origin: liveDestination, destination: liveOrigin, departureDate: returnDate, ...common }, { timeout: 30000 }),
         ]);
         setMixOut(out.data.offers || []);
         setMixBack(back.data.offers || []);
@@ -519,8 +533,8 @@ export default function FlightsScreen() {
       // was previously aborted client-side and shown as a generic
       // failure -- confirmed live in production logs.
       const res = await api.post('/flights/search', {
-        origin: origin.toUpperCase(),
-        destination: destination.toUpperCase(),
+        origin: liveOrigin,
+        destination: liveDestination,
         departureDate,
         returnDate: tripType === 'roundtrip' && returnDate ? returnDate : undefined,
         adults,
@@ -666,11 +680,11 @@ export default function FlightsScreen() {
         <div style={s.searchRow}>
           <div style={s.field}>
             <label style={s.label}>From</label>
-            <input style={s.input} value={origin} onChange={(e) => setOrigin(e.target.value.toUpperCase())} placeholder="SYD" maxLength={3} />
+            <input ref={originInputRef} style={s.input} value={origin} onChange={(e) => setOrigin(e.target.value.toUpperCase())} placeholder="SYD" maxLength={3} />
           </div>
           <div style={s.field}>
             <label style={s.label}>To</label>
-            <input style={s.input} value={destination} onChange={(e) => setDestination(e.target.value.toUpperCase())} placeholder="DPS" maxLength={3} />
+            <input ref={destinationInputRef} style={s.input} value={destination} onChange={(e) => setDestination(e.target.value.toUpperCase())} placeholder="DPS" maxLength={3} />
           </div>
           <div style={s.field}>
             <label style={s.label}>Departure</label>
