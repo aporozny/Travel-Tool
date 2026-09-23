@@ -53,6 +53,11 @@ type ExtraStatus = 'idle' | 'searching' | 'done' | 'failed';
 // would be the same mistake Flights had to be gated for.
 export default function StaysScreen() {
   const [destination, setDestination] = useState('');
+  // A browser restoring this field's text on reload (session/form history)
+  // doesn't fire a React change event, so it can look filled while state is
+  // still '' -- handleSearch reads the DOM directly instead of trusting
+  // state alone (same fix as FlightsScreen.web.tsx's origin/destination).
+  const destinationInputRef = useRef<HTMLInputElement>(null);
   const [checkInDate, setCheckInDate] = useState('');
   const [checkOutDate, setCheckOutDate] = useState('');
   const [rooms, setRooms] = useState(1);
@@ -108,11 +113,17 @@ export default function StaysScreen() {
   };
 
   const handleSearch = async () => {
-    if (!destination.trim()) { setError('Enter a destination.'); return; }
+    // Read the box itself, not just state: a browser restoring this field's
+    // text on reload doesn't fire a React change event, so state can still
+    // be '' while the field visibly shows a valid-looking destination.
+    const liveDestination = (destinationInputRef.current?.value ?? destination).trim();
+    if (liveDestination !== destination) setDestination(liveDestination);
+
+    if (!liveDestination) { setError('Enter a destination.'); return; }
     if (!checkInDate || !checkOutDate) { setError('Pick check-in and check-out dates.'); return; }
 
     const token = ++searchToken.current;
-    const payload = { destination: destination.trim(), checkInDate, checkOutDate, rooms, adults };
+    const payload = { destination: liveDestination, checkInDate, checkOutDate, rooms, adults };
     setLastSearch({ checkInDate, checkOutDate, rooms, adults });
 
     setLoading(true);
@@ -148,7 +159,7 @@ export default function StaysScreen() {
         <div style={s.searchRow}>
           <div style={s.field}>
             <label style={s.label}>Destination</label>
-            <input style={s.input} value={destination} onChange={(e) => setDestination(e.target.value)} placeholder="Bali" />
+            <input ref={destinationInputRef} style={s.input} value={destination} onChange={(e) => setDestination(e.target.value)} placeholder="Bali" />
           </div>
           <div style={s.field}>
             <label style={s.label}>Check-in</label>
