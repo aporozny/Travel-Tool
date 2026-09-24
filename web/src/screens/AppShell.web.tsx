@@ -15,7 +15,13 @@ import CommunityScreen from './CommunityScreen.web';
 import TripsScreen from './TripsScreen.web';
 import FlightsScreen from './FlightsScreen.web';
 import StaysScreen from './StaysScreen.web';
+import ComingSoonScreen from './ComingSoonScreen.web';
 import useIsMobile from '../hooks/useIsMobile.web';
+
+// Flights and Stays have no working booking path yet (Duffel live access and
+// Travelport payment are both pending), so they show a Coming Soon preview.
+// Flip to true to expose the real search screens again.
+const FLIGHTS_STAYS_LIVE = false;
 
 type Tab = 'explore' | 'community' | 'trips' | 'flights' | 'stays' | 'bookings' | 'safety' | 'profile' | 'dashboard' | 'members' | 'messages';
 
@@ -89,8 +95,8 @@ export default function AppShell() {
     switch (tab) {
       case 'community': return <CommunityScreen />;
       case 'trips':     return <TripsScreen />;
-      case 'flights':   return <FlightsScreen />;
-      case 'stays':     return <StaysScreen />;
+      case 'flights':   return FLIGHTS_STAYS_LIVE ? <FlightsScreen /> : <ComingSoonScreen kind="flights" />;
+      case 'stays':     return FLIGHTS_STAYS_LIVE ? <StaysScreen /> : <ComingSoonScreen kind="stays" />;
       case 'explore':   return <ExploreScreen onSelectOperator={(op: any) => setDetail({ type: 'operator', data: op })} detail={detail} onClearDetail={() => setDetail(null)} />;
       // An operator's bookings (with Confirm / Decline / Mark completed) live on the dashboard's Bookings tab.
       // (the keys make React start a fresh screen on the right tab when switching between the two menu items)
