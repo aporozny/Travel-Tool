@@ -88,6 +88,7 @@ export default function LoginScreen() {
     setError('');
     try {
       await dispatch(register({ email, password, role, acceptedTerms })).unwrap();
+      (window as any).fbq?.('track', 'CompleteRegistration');
       // Mark invite as used
       if (inviteToken) {
         await api.post('/waitlist/use-invite', { token: inviteToken }).catch(() => {});
@@ -105,6 +106,7 @@ export default function LoginScreen() {
     setError('');
     try {
       await api.post('/waitlist', { email, name: name || undefined, destination: destination || undefined, source: 'direct' });
+      (window as any).fbq?.('track', 'Lead');
       setWaitlistSuccess(true);
     } catch (err: any) {
       setError(err?.response?.data?.message || 'Something went wrong. Please try again.');
