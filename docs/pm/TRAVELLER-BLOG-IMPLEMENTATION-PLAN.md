@@ -31,6 +31,14 @@ What is **still open** from Phase 0, and must be done before any of this goes in
   but a feature that invites public content and public attention is the wrong time to leave that as is.
 - **No moderation of any kind exists.** This is the real gate — nothing below should go live before it.
 
+**DONE 28 Sep 2026 (commit `c7f6660`; test `community-phase0-api-test.js`, 44 checks).** All four items
+below are built, deployed and verified against the live dev database. Notes: HEIC uploads are now refused
+(the image library cannot decode HEIC, and keeping its original bytes would keep the GPS data; iOS Safari
+converts HEIC to JPEG for a normal photo picker anyway). Blocks are enforced inside the shared visibility
+check, so every read and every react/comment inherits it. The rate limits are per member, not per IP.
+Postgres and Redis now listen on 127.0.0.1 only (a pre-change backup is at `/home/andre/drift-pre-phase0-20260928.dump`).
+Still open beside this: the API container itself (port 5001) is published on all interfaces.
+
 **Phase 0 remainder — size S, about 1 day**, not the 1–2 days originally scoped, since most of it is
 already behind us:
 1. Re-encode every uploaded image on the server (the `sharp` package) and drop all metadata before
