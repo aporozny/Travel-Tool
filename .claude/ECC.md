@@ -1,4 +1,4 @@
-# Vendored from ECC
+# Vendored agent skills
 
 A curated subset of [affaan-m/ECC](https://github.com/affaan-m/ECC) (MIT, © 2026 Affaan Mustafa; see `ECC-LICENSE`), vendored at upstream commit `d3b8a3e908904e242ed2dbe66af62cca71131419` (2026-09-27).
 
@@ -56,3 +56,16 @@ Process skills from [mattpocock/skills](https://github.com/mattpocock/skills) (M
 Each has a **Travel-Tool context** section with the repo's real test commands, the lockfile and `schema.sql` merge rules, and warnings about the real database.
 
 **Not taken:** everything that needs `/setup-matt-pocock-skills` (issue-tracker config): `to-spec`, `to-tickets`, `triage`, `wayfinder`, `code-review` (which would also shadow the built-in `/code-review`). Also skipped: hook and pre-commit installers (`git-guardrails-claude-code`, `setup-pre-commit`), the `in-progress/` drafts, and course- or writing-specific skills.
+
+## Also vendored: anthropics/skills
+
+From [anthropics/skills](https://github.com/anthropics/skills) at upstream commit `33375500bcea98d610eb30ce10ac4e59b89c390d` (2026-09-24). Each skill carries its own `LICENSE.txt` (Apache-2.0).
+
+| Skill | Use |
+|---|---|
+| `webapp-testing` | Drive `web/` with Python Playwright: screenshots, console logs, UI checks |
+| `frontend-design` | Design direction and UI copy guidance for new web surfaces |
+
+**Modified (Apache-2.0 §4b notice):** `webapp-testing/scripts/with_server.py` now writes server output to a log file instead of an undrained `PIPE`, starts servers in their own session and stops them with `killpg`, and reports early server exit. Tested with a server that prints 20,000 lines: the original timed out without ever listening, while the patched version ran the command (exit 0) and left no processes behind. Both skills also have a Travel-Tool context section.
+
+**Not taken:** `docx`, `pdf`, `pptx`, `xlsx` (proprietary license, not redistributable in this repo, and already available to your account as `anthropic-skills:*`). Also `skill-creator`, `web-artifacts-builder` and `claude-api` (already available in Claude Code), and the art, branding, Slack GIF, internal-comms, theme and course skills (unrelated to this app).
