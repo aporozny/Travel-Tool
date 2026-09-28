@@ -19,9 +19,11 @@ async function call(method, p, token, body) {
 }
 // A real 1x1 PNG, and a ~1 MB file that starts like a PNG (to prove big uploads get through).
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
-const BIG = Buffer.concat([PNG.subarray(0, 8), Buffer.alloc(1024 * 1024)]);
+let BIG; // a real ~1 MB PNG (uploads are re-encoded now, so a fake header no longer passes)
 
 (async () => {
+  const sharp = require("/app/node_modules/sharp");
+  BIG = await sharp(require("crypto").randomBytes(600 * 600 * 3), { raw: { width: 600, height: 600, channels: 3 } }).png().toBuffer();
   const users = (await pool.query("SELECT id, email, role FROM users WHERE email LIKE '%@drifttest.com' AND role = 'traveler' ORDER BY email LIMIT 2")).rows;
   if (users.length < 2) { console.log("Need two seeded traveller accounts"); process.exit(1); }
   const [A, Bu] = users; const tA = tok(A), tB = tok(Bu);

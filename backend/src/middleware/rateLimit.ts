@@ -1,4 +1,27 @@
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
+import type { Request } from 'express';
+
+// Per signed-in member rather than per IP, so one busy network (a hostel,
+// a campus) does not share a budget and one account cannot spread abuse
+// across IPs. Put it AFTER authenticate; falls back to the IP if no user.
+export function perUserRateLimit(opts: { windowMs: number; max: number; message: string }) {
+  return rateLimit({
+    windowMs: opts.windowMs,
+    max: opts.max,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { message: opts.message },
+    keyGenerator: (req: Request) => {
+      const id = (req as Request & { user?: { id: string } }).user?.id;
+      return id ? `user:${id}` : ipKeyGenerator(req.ip ?? '');
+    },
+  });
+}
+
+const HOUR = 60 * 60 * 1000;
+export const postCreateRateLimit = perUserRateLimit({ windowMs: HOUR, max: 10, message: 'You are posting very quickly. Try again in a while.' });
+export const commentCreateRateLimit = perUserRateLimit({ windowMs: HOUR, max: 30, message: 'You are commenting very quickly. Try again in a while.' });
+export const uploadRateLimit = perUserRateLimit({ windowMs: HOUR, max: 20, message: 'Too many photo uploads. Try again in a while.' });
 
 // Auth endpoints - strict: 10 attempts per 15 min per IP
 export const authRateLimit = rateLimit({

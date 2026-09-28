@@ -6,6 +6,8 @@ import { resolveOrCreatePlace, DailyPlaceLimitError } from '../services/memberPl
 import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
+import sharp from 'sharp';
+import { postCreateRateLimit, commentCreateRateLimit, uploadRateLimit } from '../middleware/rateLimit';
 
 export const communityRouter = Router();
 
@@ -19,10 +21,20 @@ if (!fs.existsSync(UPLOAD_DIR)) {
 const UUID_RE = /^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
 const isUuid = (s: unknown): s is string => typeof s === 'string' && UUID_RE.test(s);
 
+// True when neither member has blocked the other (a block hides each from the
+// other, in both directions). `author` and `viewer` are SQL expressions for user
+// ids; a NULL viewer (signed out) is never blocked.
+const notBlockedWith = (author: string, viewer: string) => `NOT EXISTS (
+  SELECT 1 FROM user_blocks ub
+  WHERE (ub.blocker_id = ${viewer} AND ub.blocked_id = ${author})
+     OR (ub.blocker_id = ${author} AND ub.blocked_id = ${viewer})
+)`;
+
 // Who may see a post: everyone if it is public, its author always, any signed-in
-// member if it is members-only, and accepted connections if it is connections-only.
+// member if it is members-only, and accepted connections if it is connections-only
+// -- unless the viewer and the author have blocked each other either way.
 // `viewer` is a SQL expression for the viewer's user id (NULL when signed out).
-const visibleToViewer = (post: string, viewer: string) => `(
+const visibleToViewer = (post: string, viewer: string) => `((
   ${post}.visibility = 'public'
   OR ${post}.author_id = ${viewer}
   OR (${post}.visibility = 'members' AND ${viewer} IS NOT NULL)
@@ -32,10 +44,10 @@ const visibleToViewer = (post: string, viewer: string) => `(
       AND ((mc.requester_id = ${post}.author_id AND mc.recipient_id = ${viewer})
         OR (mc.recipient_id = ${post}.author_id AND mc.requester_id = ${viewer}))
   ))
-)`;
+) AND ${notBlockedWith(`${post}.author_id`, viewer)})`;
 
 // Only files that came out of POST /community/upload may be attached to a post.
-const UPLOAD_URL_RE = /^\/uploads\/[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}\.(jpg|png|webp|heic)$/;
+const UPLOAD_URL_RE = /^\/uploads\/[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}\.(jpg|png|webp)$/;
 
 // Does the file's own first bytes match the type the client claims?
 function looksLikeImage(buf: Buffer, mimeType: string): boolean {
@@ -43,7 +55,6 @@ function looksLikeImage(buf: Buffer, mimeType: string): boolean {
     case 'image/jpeg': return buf.length > 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff;
     case 'image/png': return buf.length > 8 && buf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
     case 'image/webp': return buf.length > 12 && buf.subarray(0, 4).toString('latin1') === 'RIFF' && buf.subarray(8, 12).toString('latin1') === 'WEBP';
-    case 'image/heic': return buf.length > 12 && buf.subarray(4, 8).toString('latin1') === 'ftyp';
     default: return false;
   }
 }
@@ -133,6 +144,7 @@ communityRouter.get('/feed', authenticate, async (req: AuthenticatedRequest, res
            OR cp.author_id = $1
            ${region ? 'OR cp.region ILIKE $4' : ''}
          )
+         AND ${notBlockedWith('cp.author_id', '$1::uuid')}
        GROUP BY cp.id, u.id, t.display_name, t.avatar_url, t.nationality,
                 pc.name, pc.category, pr.reaction, ms.id
        ORDER BY cp.created_at DESC
@@ -187,6 +199,7 @@ communityRouter.get('/discover', optionalAuth, async (req: AuthenticatedRequest,
        LEFT JOIN post_media pm ON pm.post_id = cp.id
        LEFT JOIN post_reactions pr ON pr.post_id = cp.id AND pr.user_id = $1
        WHERE cp.is_deleted = FALSE AND cp.visibility = 'public'
+         AND ${notBlockedWith('cp.author_id', '$1::uuid')}
          ${region ? 'AND cp.region ILIKE $4' : ''}
        GROUP BY cp.id, u.id, t.display_name, t.avatar_url, t.nationality,
                 pc.name, pc.category, pr.reaction
@@ -208,7 +221,7 @@ communityRouter.get('/discover', optionalAuth, async (req: AuthenticatedRequest,
 // ─── POSTS ────────────────────────────────────────────────────────────────────
 
 // POST /api/v1/community/posts
-communityRouter.post('/posts', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+communityRouter.post('/posts', authenticate, postCreateRateLimit, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const body = createPostSchema.parse(req.body);
 
@@ -417,6 +430,7 @@ communityRouter.get('/posts/:id/comments', optionalAuth, async (req: Authenticat
        LEFT JOIN travelers t ON t.user_id = pc.user_id
        WHERE pc.post_id = $1 AND pc.is_deleted = FALSE AND pc.is_hidden = FALSE
          AND cp.is_deleted = FALSE AND ${visibleToViewer('cp', '$2::uuid')}
+         AND ${notBlockedWith('pc.user_id', '$2::uuid')}
        ORDER BY pc.created_at ASC`,
       [req.params.id, req.user?.id ?? null]
     );
@@ -428,7 +442,7 @@ communityRouter.get('/posts/:id/comments', optionalAuth, async (req: Authenticat
 });
 
 // POST /api/v1/community/posts/:id/comments
-communityRouter.post('/posts/:id/comments', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+communityRouter.post('/posts/:id/comments', authenticate, commentCreateRateLimit, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const body = commentSchema.parse(req.body);
 
@@ -475,20 +489,22 @@ communityRouter.delete('/posts/:postId/comments/:commentId', authenticate, async
 // ─── PHOTO UPLOAD ─────────────────────────────────────────────────────────────
 
 // POST /api/v1/community/upload
-// Accepts base64 encoded image, saves to disk, returns URL
-communityRouter.post('/upload', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+// Accepts base64 encoded image, re-encodes it (which drops all metadata, notably
+// the GPS position a phone writes into every photo), saves to disk, returns URL
+communityRouter.post('/upload', authenticate, uploadRateLimit, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { data, mimeType } = req.body;
     if (!data || !mimeType) return res.status(400).json({ message: 'data and mimeType required' });
 
+    // HEIC is not accepted: the image library cannot decode it, and storing the
+    // original bytes untouched would keep the photo's location data.
     const validTypes: Record<string, string> = {
       'image/jpeg': 'jpg',
       'image/png': 'png',
       'image/webp': 'webp',
-      'image/heic': 'heic',
     };
 
-    if (!validTypes[mimeType]) return res.status(400).json({ message: 'Invalid image type' });
+    if (!validTypes[mimeType]) return res.status(400).json({ message: 'Invalid image type (use JPEG, PNG or WebP)' });
 
     if (typeof data !== 'string') return res.status(400).json({ message: 'data must be a base64 string' });
 
@@ -506,10 +522,22 @@ communityRouter.post('/upload', authenticate, async (req: AuthenticatedRequest, 
       return res.status(400).json({ message: 'That file is not a valid image' });
     }
 
+    // Decode and re-encode: applies the phone's rotation, then writes a fresh file
+    // with no EXIF/XMP/ICC or text chunks. Never store the client's bytes as sent.
+    let clean: Buffer;
+    try {
+      const img = sharp(buffer, { limitInputPixels: 50_000_000, failOn: 'error' }).rotate();
+      clean = mimeType === 'image/jpeg' ? await img.jpeg({ quality: 88 }).toBuffer()
+        : mimeType === 'image/png' ? await img.png().toBuffer()
+        : await img.webp({ quality: 88 }).toBuffer();
+    } catch {
+      return res.status(400).json({ message: 'That file is not a valid image' });
+    }
+
     const filename = `${crypto.randomUUID()}.${validTypes[mimeType]}`;
     const filepath = path.join(UPLOAD_DIR, filename);
 
-    fs.writeFileSync(filepath, buffer);
+    fs.writeFileSync(filepath, clean);
 
     const url = `/uploads/${filename}`;
     return res.status(201).json({ url });
@@ -538,6 +566,7 @@ communityRouter.get('/posts', authenticate, async (req: AuthenticatedRequest, re
        LEFT JOIN post_media pm ON pm.post_id = cp.id
        WHERE cp.author_id = $1 AND cp.is_deleted = FALSE
          AND (cp.visibility = 'public' OR cp.author_id = $2)
+         AND ${notBlockedWith('cp.author_id', '$2::uuid')}
        GROUP BY cp.id
        ORDER BY cp.created_at DESC
        LIMIT 50`,

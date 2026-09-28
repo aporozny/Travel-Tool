@@ -319,8 +319,9 @@ function ComposeModal({ onClose, onPosted }: { onClose: () => void; onPosted: ()
             mimeType: file.type,
           });
           setImages(prev => [...prev, res.data.url]);
-        } catch (e) {
+        } catch (e: any) {
           console.error('Upload failed', e);
+          alert(e?.response?.data?.message || 'That photo could not be uploaded. Please try a JPEG or PNG.');
         }
       };
       reader.readAsDataURL(file);
@@ -613,8 +614,9 @@ function CommentsModal({ postId, onClose }: { postId: string; onClose: () => voi
       setNewComment('');
       const r = await api.get(`/community/posts/${postId}/comments`);
       setComments(r.data || []);
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
+      alert(e?.response?.data?.message || 'Could not post your comment. Please try again.');
     } finally {
       setSubmitting(false);
     }
