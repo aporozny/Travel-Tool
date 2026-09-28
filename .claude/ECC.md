@@ -39,3 +39,20 @@ Each file ends with a **Travel-Tool context** section recording this repo's real
 ## Updating
 
 Clone upstream, diff each file above against `agents/`, `skills/` or `commands/` there, and re-apply the Travel-Tool context sections.
+
+## Also vendored: mattpocock/skills
+
+Process skills from [mattpocock/skills](https://github.com/mattpocock/skills) (MIT, © 2026 Matt Pocock; see `MATTPOCOCK-SKILLS-LICENSE`), at upstream commit `c55ee46073ed923f86ce59a5eb3b6d895095d1b7` (2026-09-18). They cover *how to work*, where ECC covers *what to check*. The Codex-only `agents/openai.yaml` files were dropped.
+
+| Skill | Use |
+|---|---|
+| `diagnosing-bugs` | Build a red-capable feedback loop, then minimise, hypothesise, instrument, fix and clean up |
+| `tdd` | Red to green in vertical slices at agreed seams (with `tests.md` and `mocking.md`) |
+| `codebase-design` | Deep-module vocabulary: interface, seam, adapter, depth |
+| `grilling` / `/grill-me` | Round-based interview to stress-test a plan before building |
+| `/handoff` | Hand off to a fresh session (saved in `docs/handoffs/` when running in the cloud) |
+| `resolving-merge-conflicts` | Intent-preserving conflict resolution |
+
+Each has a **Travel-Tool context** section with the repo's real test commands, the lockfile and `schema.sql` merge rules, and warnings about the real database.
+
+**Not taken:** everything that needs `/setup-matt-pocock-skills` (issue-tracker config): `to-spec`, `to-tickets`, `triage`, `wayfinder`, `code-review` (which would also shadow the built-in `/code-review`). Also skipped: hook and pre-commit installers (`git-guardrails-claude-code`, `setup-pre-commit`), the `in-progress/` drafts, and course- or writing-specific skills.
