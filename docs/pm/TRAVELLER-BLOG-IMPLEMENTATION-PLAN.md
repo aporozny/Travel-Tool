@@ -79,9 +79,24 @@ absent from this deployment; the pipeline runs Claude-only today (Claude receive
 call as text, so nothing is uncovered) and OpenAI can be added later purely as a free cost-optimising
 first pass, not a functional requirement. Also fixed in passing: `ANTHROPIC_API_KEY` was mapped only
 under `voice-worker` in `docker-compose.yml`, not `backend` -- the exact same env-var gotcha this
-project has hit before. **Not yet built:** the admin review screen (§3 of the moderation plan),
-reporting/auto-hold (§4), and the author appeal experience (§5) -- the schema for all three already
-exists (migration 048), only the routes/UI remain.
+project has hit before.
+
+**Admin review screen + reporting/auto-hold + author appeal: DONE 29 Sep 2026 (commits `125f2f0`
+schema follow-up via migration 049, and `4bce12f`), CI green, live in production.** `/admin/moderation`
+lists pending/held content with the pipeline's own categories/quoted-span/reason/reviewer-question and
+a real Allow/Block form (not `admin.html`'s unsafe innerHTML pattern); `POST /community/posts/:id/report`
+(+ comments) reuses `safety_reports` and auto-holds after 3 distinct reporters, paging the reviewer at
+the same non-urgent tier as the booking notifications; `POST /community/posts/:id/appeal` (+ comments)
+never invents a new status or calls the pipeline again -- it copies the current verdict forward and the
+admin queue query was fixed to actually surface it (an appealed post's `moderation_status` stays
+blocked/held, which the queue's own status filter would otherwise exclude forever). Two more real bugs
+caught by running this for real: migration 048 never gave `moderation_decisions` anywhere to store the
+pipeline's own `reviewer_question` (computed, then silently discarded -- fixed with migration 049,
+caught while building the screen that needed to display it); and the queue's merge-sort crashed the
+first time it had more than one item, because `pg` returns a `TIMESTAMPTZ` column as a real `Date`
+object, not a string like this codebase's other DATE/TIMESTAMP columns. Live-verified in the browser:
+a real held post, decided Allow through the actual UI, confirmed allowed in the database. **This closes
+out Phase 1 (moderation) of this plan in full.**
 
 - **Schema:** `moderation_status` on `community_posts` and `post_comments` (`pending` / `allowed` /
   `held` / `blocked`, default `pending`); a new append-only `moderation_decisions` table (post or
