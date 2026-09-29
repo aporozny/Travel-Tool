@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 import { z } from 'zod';
 import { pool } from '../utils/db';
 import { authenticate, AuthenticatedRequest } from '../middleware/authenticate';
+import { sendBookingNotification } from '../services/notifications';
 
 export const bookingsRouter = Router();
 
@@ -39,18 +40,20 @@ bookingsRouter.post('/', authenticate, async (req: AuthenticatedRequest, res: Re
       return res.status(400).json({ message: 'End date must be after start date' });
     }
 
-    // Get traveler id
+    // Get traveler id and name (also needed for the operator's notification)
     const travelerResult = await pool.query(
-      'SELECT id FROM travelers WHERE user_id = $1',
+      'SELECT id, first_name, last_name FROM travelers WHERE user_id = $1',
       [req.user!.id]
     );
     if (travelerResult.rows.length === 0) {
       return res.status(404).json({ message: 'Traveler profile not found' });
     }
 
-    // Verify operator exists
+    // Verify operator exists, and get its owner's email for the notification
     const operatorResult = await pool.query(
-      'SELECT id, business_name FROM operators WHERE id = $1',
+      `SELECT o.id, o.business_name, u.email AS operator_email
+       FROM operators o JOIN users u ON u.id = o.user_id
+       WHERE o.id = $1`,
       [body.operator_id]
     );
     if (operatorResult.rows.length === 0) {
@@ -74,6 +77,19 @@ bookingsRouter.post('/', authenticate, async (req: AuthenticatedRequest, res: Re
         body.notes ?? null,
       ]
     );
+
+    const traveler = travelerResult.rows[0];
+    const travelerName = [traveler.first_name, traveler.last_name].filter(Boolean).join(' ') || 'A traveller';
+    sendBookingNotification({
+      type: 'booking_request',
+      travelerEmail: req.user!.email,
+      travelerName,
+      operatorName: operatorResult.rows[0].business_name,
+      operatorEmail: operatorResult.rows[0].operator_email,
+      startDate: body.start_date,
+      endDate: body.end_date ?? null,
+      guests: body.guests,
+    }).catch((err) => console.error('sendBookingNotification (request) failed:', err));
 
     return res.status(201).json({
       ...result.rows[0],
@@ -173,14 +189,18 @@ bookingsRouter.patch('/:id/status', authenticate, async (req: AuthenticatedReque
   try {
     const { status } = updateStatusSchema.parse(req.body);
 
-    // Get the booking with ownership info
+    // Get the booking with ownership info, and everything the notification needs
     const bookingResult = await pool.query(
-      `SELECT b.id, b.status,
-              t.user_id AS traveler_user_id,
-              o.user_id AS operator_user_id
+      `SELECT b.id, b.status, b.start_date, b.end_date, b.guests,
+              t.user_id AS traveler_user_id, t.first_name, t.last_name,
+              tu.email AS traveler_email,
+              o.user_id AS operator_user_id, o.business_name,
+              ou.email AS operator_email
        FROM bookings b
        JOIN travelers t ON t.id = b.traveler_id
+       JOIN users tu ON tu.id = t.user_id
        JOIN operators o ON o.id = b.operator_id
+       JOIN users ou ON ou.id = o.user_id
        WHERE b.id = $1`,
       [req.params.id]
     );
@@ -220,6 +240,17 @@ bookingsRouter.patch('/:id/status', authenticate, async (req: AuthenticatedReque
        RETURNING id, status, updated_at`,
       [status, req.params.id]
     );
+
+    sendBookingNotification({
+      type: `booking_${status}` as 'booking_confirmed' | 'booking_cancelled' | 'booking_completed',
+      travelerEmail: booking.traveler_email,
+      travelerName: [booking.first_name, booking.last_name].filter(Boolean).join(' ') || 'A traveller',
+      operatorName: booking.business_name,
+      operatorEmail: booking.operator_email,
+      startDate: booking.start_date,
+      endDate: booking.end_date ?? null,
+      guests: booking.guests,
+    }).catch((err) => console.error(`sendBookingNotification (${status}) failed:`, err));
 
     return res.json(result.rows[0]);
   } catch (err) {

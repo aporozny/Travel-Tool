@@ -354,6 +354,109 @@ function DetailPanel({ item, onClose, onBook }: any) {
 	);
 }
 
+function RequestBookingModal({ item, onClose }: { item: any; onClose: () => void }) {
+	const todayIso = new Date().toISOString().slice(0, 10);
+	const [startDate, setStartDate] = useState("");
+	const [endDate, setEndDate] = useState("");
+	const [guests, setGuests] = useState(1);
+	const [notes, setNotes] = useState("");
+	const [submitting, setSubmitting] = useState(false);
+	const [error, setError] = useState<string | null>(null);
+	const [sent, setSent] = useState(false);
+
+	const submit = async () => {
+		if (!startDate) { setError("Choose a date"); return; }
+		setSubmitting(true);
+		setError(null);
+		try {
+			await api.post("/bookings", {
+				operator_id: item.id,
+				start_date: startDate,
+				end_date: endDate || undefined,
+				guests,
+				notes: notes.trim() || undefined,
+			});
+			setSent(true);
+		} catch (e: any) {
+			setError(e?.response?.data?.message || "Could not send the request. Please try again.");
+		} finally {
+			setSubmitting(false);
+		}
+	};
+
+	return (
+		<div style={styles.modalOverlay} onClick={onClose}>
+			<div style={styles.modalCard} onClick={(e) => e.stopPropagation()}>
+				{sent ? (
+					<>
+						<p style={{ fontSize: 32, marginBottom: 8 }}>✓</p>
+						<h3 style={styles.modalTitle}>Request sent</h3>
+						<p style={styles.modalText}>
+							{item.name} will get back to you. Track it from the Bookings tab.
+						</p>
+						<button style={styles.bookBtn} onClick={onClose}>Done</button>
+					</>
+				) : (
+					<>
+						<h3 style={styles.modalTitle}>Request a booking</h3>
+						<p style={styles.modalText}>{item.name}</p>
+						<label style={styles.modalLabel}>
+							Date{item.category === "accommodation" ? " you arrive" : ""}
+							<input
+								type="date"
+								min={todayIso}
+								value={startDate}
+								onChange={(e) => setStartDate(e.target.value)}
+								style={styles.modalInput}
+							/>
+						</label>
+						{item.category === "accommodation" && (
+							<label style={styles.modalLabel}>
+								Date you leave (optional)
+								<input
+									type="date"
+									min={startDate || todayIso}
+									value={endDate}
+									onChange={(e) => setEndDate(e.target.value)}
+									style={styles.modalInput}
+								/>
+							</label>
+						)}
+						<label style={styles.modalLabel}>
+							Guests
+							<input
+								type="number"
+								min={1}
+								max={50}
+								value={guests}
+								onChange={(e) => setGuests(Math.max(1, parseInt(e.target.value, 10) || 1))}
+								style={styles.modalInput}
+							/>
+						</label>
+						<label style={styles.modalLabel}>
+							Notes for {item.name} (optional)
+							<textarea
+								value={notes}
+								onChange={(e) => setNotes(e.target.value)}
+								maxLength={1000}
+								rows={3}
+								style={{ ...styles.modalInput, resize: "vertical" as const }}
+							/>
+						</label>
+						{error && <p style={styles.modalError}>{error}</p>}
+						<div style={styles.modalActions}>
+							<button style={styles.modalCancelBtn} onClick={onClose} disabled={submitting}>Cancel</button>
+							<button style={styles.bookBtn} onClick={submit} disabled={submitting}>
+								{submitting ? "Sending..." : "Send request"}
+							</button>
+						</div>
+					</>
+				)}
+			</div>
+		</div>
+	);
+}
+
 function loadRecent(): string[] {
 	try {
 		const raw = localStorage.getItem(RECENT_KEY);
@@ -364,12 +467,9 @@ function loadRecent(): string[] {
 	}
 }
 
-export default function ExploreScreen({
-	onSelectOperator,
-	detail,
-	onClearDetail,
-}: any) {
+export default function ExploreScreen() {
 	const [results, setResults] = useState<any[]>([]);
+	const [bookingItem, setBookingItem] = useState<any>(null);
 	const [loading, setLoading] = useState(true);
 	const [hasMore, setHasMore] = useState(false);
 	const [loadingMore, setLoadingMore] = useState(false);
@@ -682,11 +782,11 @@ export default function ExploreScreen({
 				<DetailPanel
 					item={selected}
 					onClose={() => setSelected(null)}
-					onBook={(item: any) => {
-						onSelectOperator(item);
-						setSelected(null);
-					}}
+					onBook={(item: any) => setBookingItem(item)}
 				/>
+				{bookingItem && (
+					<RequestBookingModal item={bookingItem} onClose={() => setBookingItem(null)} />
+				)}
 			</div>
 		);
 	}
@@ -1386,6 +1486,57 @@ const styles: Record<string, React.CSSProperties> = {
 		padding: "14px 0",
 		background: "#C9A84C",
 		color: "#fff",
+		border: "none",
+		borderRadius: 12,
+		fontSize: 16,
+		fontWeight: 600,
+		cursor: "pointer",
+	},
+	modalOverlay: {
+		position: "fixed" as const,
+		inset: 0,
+		background: "rgba(0,0,0,0.4)",
+		display: "flex",
+		alignItems: "center",
+		justifyContent: "center",
+		zIndex: 1000,
+		padding: 16,
+	},
+	modalCard: {
+		background: "#fff",
+		borderRadius: 20,
+		width: "100%",
+		maxWidth: 420,
+		padding: 24,
+		boxShadow: "0 20px 60px rgba(0,0,0,0.15)",
+	},
+	modalTitle: { fontSize: 20, fontWeight: 700, color: "#1a1a1a", margin: "0 0 4px" },
+	modalText: { fontSize: 14, color: "#555", margin: "0 0 16px" },
+	modalLabel: {
+		display: "block",
+		fontSize: 13,
+		fontWeight: 600,
+		color: "#333",
+		marginBottom: 14,
+	},
+	modalInput: {
+		display: "block",
+		width: "100%",
+		marginTop: 6,
+		padding: "10px 12px",
+		borderRadius: 10,
+		border: "1px solid #ddd",
+		fontSize: 14,
+		fontFamily: "inherit",
+		boxSizing: "border-box" as const,
+	},
+	modalError: { color: "#C62828", fontSize: 13, marginBottom: 12 },
+	modalActions: { display: "flex", gap: 10 },
+	modalCancelBtn: {
+		flex: 1,
+		padding: "14px 0",
+		background: "#F0F0F0",
+		color: "#333",
 		border: "none",
 		borderRadius: 12,
 		fontSize: 16,

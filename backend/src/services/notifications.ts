@@ -194,9 +194,23 @@ export async function sendBookingNotification(data: BookingNotification): Promis
   };
 
   const msg = messages[data.type];
+  const subject = `Drift booking: ${data.operatorName}`;
 
   console.log('=== BOOKING NOTIFICATION ===');
   console.log(`To traveler (${data.travelerEmail}):`, msg.traveler);
   console.log(`To operator (${data.operatorEmail}):`, msg.operator);
   console.log('============================');
+
+  // Same reserved-address list used for trip notifications (tripNotificationWorker.ts) --
+  // duplicated rather than imported to avoid a circular import (that module imports
+  // sendEmail from this one). A bounce on a made-up test address damages the sender
+  // reputation real travellers' emails depend on.
+  const suppressed = (email: string) =>
+    /@(example\.(com|org|net)|drifttest\.com|[^@]*\.invalid|invalid)$/i.test(email.trim()) ||
+    /^sandbox-test@/i.test(email.trim());
+
+  await Promise.allSettled([
+    suppressed(data.travelerEmail) ? Promise.resolve(false) : sendEmail(data.travelerEmail, subject, msg.traveler),
+    suppressed(data.operatorEmail) ? Promise.resolve(false) : sendEmail(data.operatorEmail, subject, msg.operator),
+  ]);
 }

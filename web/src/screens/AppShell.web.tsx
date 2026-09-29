@@ -46,7 +46,6 @@ export default function AppShell() {
   // something a query can fix, so it shouldn't be where a traveller
   // lands by default while that's still true.
   const [tab, setTab] = useState<Tab>(user?.role === 'operator' ? 'dashboard' : 'explore');
-  const [detail, setDetail] = useState<any>(null);
   const [pendingConnections, setPendingConnections] = useState(0);
   const [unreadMessages, setUnreadMessages] = useState(0);
   const isMobile = useIsMobile();
@@ -97,7 +96,7 @@ export default function AppShell() {
       case 'trips':     return <TripsScreen />;
       case 'flights':   return FLIGHTS_STAYS_LIVE ? <FlightsScreen /> : <ComingSoonScreen kind="flights" />;
       case 'stays':     return FLIGHTS_STAYS_LIVE ? <StaysScreen /> : <ComingSoonScreen kind="stays" />;
-      case 'explore':   return <ExploreScreen onSelectOperator={(op: any) => setDetail({ type: 'operator', data: op })} detail={detail} onClearDetail={() => setDetail(null)} />;
+      case 'explore':   return <ExploreScreen />;
       // An operator's bookings (with Confirm / Decline / Mark completed) live on the dashboard's Bookings tab.
       // (the keys make React start a fresh screen on the right tab when switching between the two menu items)
       case 'bookings':  return isOperator ? <DashboardScreen key="bookings" initialTab="bookings" /> : <BookingsScreen />;
@@ -162,7 +161,7 @@ export default function AppShell() {
                 ...styles.navItem,
                 ...(tab === item.key ? styles.navItemActive : {}),
               }}
-              onClick={() => { setTab(item.key); setDetail(null); setDrawerOpen(false); }}
+              onClick={() => { setTab(item.key); setDrawerOpen(false); }}
             >
               <span style={{
                 ...styles.navIcon,
