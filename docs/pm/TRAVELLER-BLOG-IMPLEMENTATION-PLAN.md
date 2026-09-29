@@ -55,6 +55,16 @@ already behind us:
 
 Nothing in the recommendation's pipeline exists yet. This is the actual gate on publishing anything.
 
+**Full design and implementation plan (29 Sep 2026):** `BLOG-MODERATION-DESIGN-AND-IMPLEMENTATION-PLAN.md`
+in this same folder — the exact migration SQL, the `services/moderation.ts` shape and prompt-injection
+defense, the admin review screen and its backend routes, the reporting/auto-hold flow, and the author
+appeal path. Produced by three parallel design passes (schema, pipeline, review UI) each grounded in
+the live repo, then reconciled by hand where they disagreed — notably, the pipeline design's `pending`
+fail-closed status can never be written as a `moderation_decisions` row (the schema's `verdict` CHECK
+only allows `allowed`/`held`/`blocked`), and the appeal flow's decision row copies the content's current
+verdict forward rather than inventing a fifth status. The summary below is the original sketch; treat
+the linked doc as current for anything that would contradict it.
+
 - **Schema:** `moderation_status` on `community_posts` and `post_comments` (`pending` / `allowed` /
   `held` / `blocked`, default `pending`); a new append-only `moderation_decisions` table (post or
   comment id, stage, verdict, categories, quoted span, reason, reviewer's answer, policy version,
