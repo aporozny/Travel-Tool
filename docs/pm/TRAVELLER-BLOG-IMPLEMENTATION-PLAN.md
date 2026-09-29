@@ -142,15 +142,26 @@ Phase 1b and Phase 2 can run in parallel once moderation exists, since they touc
 the schema. Total to a live, moderated text-and-photo blog with confirmed visits: **roughly 4–5
 weeks** of engineering, not counting review or legal turnaround.
 
-## Decisions still needed (trimmed from the recommendation's list — these are the ones actually
-## blocking Phase 1b/2, not the ones already answered)
+## Decisions — answered 29 Sep 2026
 
-1. Reward shape: what do points convert to (credit, cash, nothing yet)?
-2. Badge wording: "Visit confirmed", or Andre's own preference.
-3. Minimum age 16 and no follows/DMs on the blog at launch (the recommendation's eSafety read)?
-4. Engage a lawyer (Australian, plus Indonesian counsel) before anything with named businesses goes
-   out on Drift's own channels?
-5. Who answers the reviewer's questions in Indonesian, when a case needs it?
+1. **Reward shape: deferred.** Not decided yet, and deliberately not blocking Phase 2's engineering
+   start — the reward ledger table and disclosed-label mechanism are built as configuration either way
+   (see Phase 2), so this can be answered later without rework.
+2. **Badge wording: "Visit confirmed."** Confirmed as-is, no change from the recommendation.
+3. **Minimum age 16, and no follows/DMs on the blog at launch: confirmed**, per the recommendation's
+   eSafety read. Build the blog without a follow/DM surface from day one, not as a launch-day toggle.
+4. **Lawyer engagement: Andre's own action, not an engineering task.** Not something this project
+   schedules or chases — the Phase 1b/2 engineering work is not gated on it.
+5. **Indonesian-language review: a translation pipeline, not a bilingual reviewer.** When a visit-
+   confirmation or moderation case involves Indonesian text (a receipt, a business name, a reported
+   comment), the flow is: incoming Indonesian → translated to English for the reviewer → Andre (or
+   whoever reviews) answers in English → translated back to Indonesian for anything that needs to go
+   out in that language. No dedicated Indonesian-speaking reviewer is needed. Translation should run
+   through Claude (already the model doing the Phase 1 moderation classification) rather than a
+   separate translation API — one fewer vendor/key to manage. The review screen (moderation plan §1/§3)
+   should show "original (Indonesian) / English translation" side by side rather than replacing one
+   with the other, so a reviewer who does read some Indonesian can still sanity-check the translation
+   rather than trusting it blind.
 
 Everything else in the original nine questions (start Phase 0, hold until checked, video self-hosted
 and phased) is already decided and reflected in the plan above.

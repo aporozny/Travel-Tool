@@ -382,6 +382,15 @@ reports (no AI categories yet) show "Held because: 3 members reported this" in p
 Items with a latest decision of `stage = 'appeal_requested'` get a distinct "Appealed" badge so a
 human already knows this was already actioned once and the author is asking for a second look.
 
+**Indonesian-language content (decided 29 Sep 2026, [[project_drift_travel_app]]):** no dedicated
+Indonesian-speaking reviewer — translation runs through Claude instead (reuses the same model already
+doing stage-2 classification, one fewer vendor/key). When a post/comment's language is detected as
+non-English, the card shows the original text AND an English translation side by side, not translation
+in place of the original — a reviewer who reads some Indonesian can sanity-check the translation rather
+than trusting it blind. The reviewer's note/decision is written in English; if anything needs to go
+back out in Indonesian (e.g. a future author-facing message), that's a second Claude translation call
+at send time, not something the reviewer writes bilingually themselves.
+
 Backend routes, matching `markupAdmin.ts`'s exact shape (admin-only 403 guard, zod validation,
 ZodError → 400 / generic → 500):
 
