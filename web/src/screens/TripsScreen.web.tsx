@@ -3,6 +3,8 @@ import { useSelector } from 'react-redux';
 import { RootState } from '../store';
 import api from '../services/api.web';
 import { WhosGoingPanel } from './WhosGoingPanel';
+import { TravelBookings } from './TravelBookings.web';
+import { OperatorBookings } from './OperatorBookings.web';
 
 // ─── Design tokens ─────────────────────────────────────────────────────────
 // Matches CommunityScreen.web.tsx / AppShell.web.tsx exactly -- same
@@ -141,6 +143,9 @@ export default function TripsScreen() {
           <button style={s.createBtn} onClick={() => setCreating(true)}>+ New trip</button>
         )}
       </div>
+
+      <TravelBookings />
+      <OperatorBookings />
 
       <div style={s.subTabRow}>
         <button
