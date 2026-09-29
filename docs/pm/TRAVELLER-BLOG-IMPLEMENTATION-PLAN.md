@@ -65,6 +65,24 @@ only allows `allowed`/`held`/`blocked`), and the appeal flow's decision row copi
 verdict forward rather than inventing a fifth status. The summary below is the original sketch; treat
 the linked doc as current for anything that would contradict it.
 
+**Migration 048 + services/moderation.ts + community.ts wiring: DONE 29 Sep 2026 (commit `125f2f0`),
+CI green, live in production.** The automated pipeline (stage 0 rule check, optional OpenAI, Claude
+Haiku/Sonnet) is running for real on every new post and comment. Two real bugs were found and fixed by
+actually attacking the pipeline with a live payload rather than trusting the design: (1) the untrusted-
+content tag wrapper didn't escape the user's own text, so a body containing a literal
+`</user_submitted_content>` forged a fake tag boundary and got an injected instruction obeyed --
+confirmed exploitable live, then confirmed fixed; (2) the written policy didn't name "attempting to
+manipulate the classifier" as its own violation, so Claude correctly refused to obey the injected
+instruction but then separately, correctly, found nothing else to flag and passed the content anyway --
+fixed by making manipulation-detection an independent, mandatory category. `OPENAI_API_KEY` is still
+absent from this deployment; the pipeline runs Claude-only today (Claude receives images in the same
+call as text, so nothing is uncovered) and OpenAI can be added later purely as a free cost-optimising
+first pass, not a functional requirement. Also fixed in passing: `ANTHROPIC_API_KEY` was mapped only
+under `voice-worker` in `docker-compose.yml`, not `backend` -- the exact same env-var gotcha this
+project has hit before. **Not yet built:** the admin review screen (§3 of the moderation plan),
+reporting/auto-hold (§4), and the author appeal experience (§5) -- the schema for all three already
+exists (migration 048), only the routes/UI remain.
+
 - **Schema:** `moderation_status` on `community_posts` and `post_comments` (`pending` / `allowed` /
   `held` / `blocked`, default `pending`); a new append-only `moderation_decisions` table (post or
   comment id, stage, verdict, categories, quoted span, reason, reviewer's answer, policy version,
