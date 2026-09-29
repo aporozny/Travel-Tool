@@ -22,6 +22,7 @@ const HOUR = 60 * 60 * 1000;
 export const postCreateRateLimit = perUserRateLimit({ windowMs: HOUR, max: 10, message: 'You are posting very quickly. Try again in a while.' });
 export const commentCreateRateLimit = perUserRateLimit({ windowMs: HOUR, max: 30, message: 'You are commenting very quickly. Try again in a while.' });
 export const uploadRateLimit = perUserRateLimit({ windowMs: HOUR, max: 20, message: 'Too many photo uploads. Try again in a while.' });
+export const reportRateLimit = perUserRateLimit({ windowMs: HOUR, max: 20, message: 'Too many reports. Try again in a while.' });
 
 // Auth endpoints - strict: 10 attempts per 15 min per IP
 export const authRateLimit = rateLimit({

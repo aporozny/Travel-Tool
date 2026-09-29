@@ -7,8 +7,9 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import sharp from 'sharp';
-import { postCreateRateLimit, commentCreateRateLimit, uploadRateLimit } from '../middleware/rateLimit';
+import { postCreateRateLimit, commentCreateRateLimit, uploadRateLimit, reportRateLimit } from '../middleware/rateLimit';
 import { moderateAndPersist, type ModerationImage } from '../services/moderation';
+import { sendReviewerAlert } from '../services/notifications';
 
 export const communityRouter = Router();
 
@@ -105,6 +106,19 @@ const createPostSchema = z.object({
 
 const commentSchema = z.object({
   body: z.string().min(1).max(1000),
+});
+
+const reportContentSchema = z.object({
+  category: z.enum(['harassment', 'inappropriate_content', 'scam', 'other']),
+  description: z.string().min(10).max(2000),
+});
+
+// How many distinct members must report the same content before it is automatically held for
+// review, even though nothing automated flagged it. Matches the plan doc's "3 unique reporters".
+const AUTO_HOLD_REPORTER_THRESHOLD = 3;
+
+const appealSchema = z.object({
+  note: z.string().min(1).max(1000),
 });
 
 // ─── FEED ─────────────────────────────────────────────────────────────────────
@@ -519,6 +533,163 @@ communityRouter.delete('/posts/:postId/comments/:commentId', authenticate, async
     if (!result.rows.length) return res.status(404).json({ message: 'Comment not found' });
     return res.json({ success: true });
   } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+// ─── REPORTING ──────────────────────────────────────────────────────────────
+
+// After a new report lands, holds the content for review once AUTO_HOLD_REPORTER_THRESHOLD distinct
+// members have reported it -- but only the first time that threshold is crossed. The
+// `moderation_status = 'allowed'` guard is the whole safety net: a post already 'held' just gets one
+// more report recorded as evidence (no-op here), and a post already 'blocked' is left blocked --
+// reports never "unblock" or re-queue an already-actioned item.
+async function autoHoldIfReportedEnough(
+  contentType: 'post' | 'comment',
+  contentId: string
+): Promise<void> {
+  const table = contentType === 'post' ? 'community_posts' : 'post_comments';
+  const reportColumn = contentType === 'post' ? 'reported_post_id' : 'reported_comment_id';
+  const idColumn = contentType === 'post' ? 'post_id' : 'comment_id';
+
+  const { rows: [{ count }] } = await pool.query(
+    `SELECT count(DISTINCT reporter_id)::int AS count FROM safety_reports WHERE ${reportColumn} = $1`,
+    [contentId]
+  );
+  if (count < AUTO_HOLD_REPORTER_THRESHOLD) return;
+
+  const { rows } = await pool.query(
+    `UPDATE ${table} SET moderation_status = 'held' WHERE id = $1 AND moderation_status = 'allowed' RETURNING id`,
+    [contentId]
+  );
+  if (rows.length === 0) return; // already held or blocked -- the report above still counted as evidence
+
+  await pool.query(
+    `INSERT INTO moderation_decisions (${idColumn}, stage, verdict, categories, reason, policy_version)
+     VALUES ($1, 'member_reports', 'held', $2, $3, 'v1')`,
+    [contentId, ['member_reported'], `${AUTO_HOLD_REPORTER_THRESHOLD}+ unique members reported this content.`]
+  );
+
+  sendReviewerAlert({
+    subject: 'Community report auto-held a post',
+    body: `A ${contentType} (id ${contentId}) was automatically held after ${AUTO_HOLD_REPORTER_THRESHOLD}+ members reported it. Review it in the moderation queue.`,
+    urgent: false,
+  }).catch((err) => console.error('sendReviewerAlert (auto-hold) failed:', err));
+}
+
+async function handleReport(
+  req: AuthenticatedRequest,
+  res: Response,
+  contentType: 'post' | 'comment',
+  reportColumn: 'reported_post_id' | 'reported_comment_id'
+): Promise<Response> {
+  const body = reportContentSchema.parse(req.body);
+  const contentId = req.params.id;
+  if (!isUuid(contentId)) return res.status(404).json({ message: `${contentType === 'post' ? 'Post' : 'Comment'} not found` });
+
+  const table = contentType === 'post' ? 'community_posts' : 'post_comments';
+  const exists = await pool.query(`SELECT 1 FROM ${table} WHERE id = $1 AND is_deleted = FALSE`, [contentId]);
+  if (!exists.rows.length) return res.status(404).json({ message: `${contentType === 'post' ? 'Post' : 'Comment'} not found` });
+
+  try {
+    await pool.query(
+      `INSERT INTO safety_reports (reporter_id, category, description, ${reportColumn})
+       SELECT t.id, $1, $2, $3 FROM travelers t WHERE t.user_id = $4`,
+      [body.category, body.description, contentId, req.user!.id]
+    );
+  } catch (err: any) {
+    if (err?.code === '23505') return res.status(409).json({ message: 'You have already reported this.' });
+    throw err;
+  }
+
+  await autoHoldIfReportedEnough(contentType, contentId);
+  return res.status(201).json({ success: true });
+}
+
+// POST /api/v1/community/posts/:id/report
+communityRouter.post('/posts/:id/report', authenticate, reportRateLimit, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    return await handleReport(req, res, 'post', 'reported_post_id');
+  } catch (err) {
+    if (err instanceof z.ZodError) return res.status(400).json({ message: 'Validation error', errors: err.errors });
+    console.error(err);
+    return res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+// POST /api/v1/community/posts/:postId/comments/:id/report
+communityRouter.post('/posts/:postId/comments/:id/report', authenticate, reportRateLimit, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    return await handleReport(req, res, 'comment', 'reported_comment_id');
+  } catch (err) {
+    if (err instanceof z.ZodError) return res.status(400).json({ message: 'Validation error', errors: err.errors });
+    console.error(err);
+    return res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+// ─── APPEAL ─────────────────────────────────────────────────────────────────
+
+// Deliberately minimal: this never introduces a new moderation_status, and it never calls the
+// pipeline again -- "never back to the same model automatically" means the item just re-enters the
+// human queue (any admin GET /admin/moderation/queue picking up a latest decision of
+// stage='appeal_requested' is the mechanism, not a new status column). The verdict/categories are
+// copied forward unchanged from the decision being appealed: an appeal doesn't change what was
+// decided, it flags that decision for a second human look.
+async function handleAppeal(req: AuthenticatedRequest, res: Response, contentType: 'post' | 'comment'): Promise<Response> {
+  const body = appealSchema.parse(req.body);
+  const contentId = req.params.id;
+  if (!isUuid(contentId)) return res.status(404).json({ message: `${contentType === 'post' ? 'Post' : 'Comment'} not found` });
+
+  const table = contentType === 'post' ? 'community_posts' : 'post_comments';
+  const authorColumn = contentType === 'post' ? 'author_id' : 'user_id';
+  const idColumn = contentType === 'post' ? 'post_id' : 'comment_id';
+
+  const content = await pool.query(
+    `SELECT moderation_status FROM ${table} WHERE id = $1 AND ${authorColumn} = $2 AND is_deleted = FALSE`,
+    [contentId, req.user!.id]
+  );
+  if (!content.rows.length) return res.status(404).json({ message: `${contentType === 'post' ? 'Post' : 'Comment'} not found` });
+  const status = content.rows[0].moderation_status;
+  if (!['held', 'blocked'].includes(status)) {
+    return res.status(400).json({ message: 'Only held or blocked content can be appealed.' });
+  }
+
+  const latest = await pool.query(
+    `SELECT stage, categories FROM moderation_decisions WHERE ${idColumn} = $1 ORDER BY created_at DESC LIMIT 1`,
+    [contentId]
+  );
+  if (latest.rows[0]?.stage === 'appeal_requested') {
+    return res.status(409).json({ message: 'You have already asked for a review of this.' });
+  }
+
+  await pool.query(
+    `INSERT INTO moderation_decisions (${idColumn}, stage, verdict, categories, reason, policy_version)
+     VALUES ($1, 'appeal_requested', $2, $3, $4, 'v1')`,
+    [contentId, status, latest.rows[0]?.categories?.length ? latest.rows[0].categories : ['appeal'], `Author asked for a human review: ${body.note}`]
+  );
+
+  return res.status(201).json({ success: true });
+}
+
+// POST /api/v1/community/posts/:id/appeal
+communityRouter.post('/posts/:id/appeal', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    return await handleAppeal(req, res, 'post');
+  } catch (err) {
+    if (err instanceof z.ZodError) return res.status(400).json({ message: 'Validation error', errors: err.errors });
+    console.error(err);
+    return res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+// POST /api/v1/community/posts/:postId/comments/:id/appeal
+communityRouter.post('/posts/:postId/comments/:id/appeal', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    return await handleAppeal(req, res, 'comment');
+  } catch (err) {
+    if (err instanceof z.ZodError) return res.status(400).json({ message: 'Validation error', errors: err.errors });
     console.error(err);
     return res.status(500).json({ message: 'Internal server error' });
   }

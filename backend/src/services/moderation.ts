@@ -336,9 +336,9 @@ export async function moderateAndPersist(target: ModerationTarget): Promise<void
       );
     } else {
       await client.query(
-        `INSERT INTO moderation_decisions (${idColumn}, stage, verdict, categories, quoted_span, reason, policy_version)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        [target.id, resolved.stage, resolved.status, resolved.categories, resolved.quotedSpan, resolved.reason, POLICY_VERSION]
+        `INSERT INTO moderation_decisions (${idColumn}, stage, verdict, categories, quoted_span, reason, reviewer_question, policy_version)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [target.id, resolved.stage, resolved.status, resolved.categories, resolved.quotedSpan, resolved.reason, resolved.reviewerQuestion, POLICY_VERSION]
       );
     }
     await client.query(`UPDATE ${table} SET moderation_status = $1 WHERE id = $2`, [resolved.status, target.id]);

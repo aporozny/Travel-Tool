@@ -732,6 +732,7 @@ CREATE TABLE public.moderation_decisions (
     reviewer_id uuid,
     reviewer_response text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
+    reviewer_question text,
     CONSTRAINT moderation_decisions_categories_required_check CHECK (((verdict = 'allowed'::text) OR (cardinality(categories) > 0))),
     CONSTRAINT moderation_decisions_exactly_one_target CHECK ((((post_id IS NOT NULL) AND (comment_id IS NULL)) OR ((post_id IS NULL) AND (comment_id IS NOT NULL)))),
     CONSTRAINT moderation_decisions_reviewer_fields_check CHECK ((((stage = 'human_review'::text) AND (reviewer_id IS NOT NULL)) OR ((stage <> 'human_review'::text) AND (reviewer_id IS NULL) AND (reviewer_response IS NULL)))),
