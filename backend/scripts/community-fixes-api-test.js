@@ -66,6 +66,16 @@ let BIG; // a real ~1 MB PNG (uploads are re-encoded now, so a fake header no lo
   r = await call("POST", "/community/posts", tA, { body: "Public note from the API test", visibility: "public" });
   const publicId = r.d?.postId; if (publicId) madePosts.push(publicId);
   ok("a public post can be created", r.s === 201 && publicId, JSON.stringify(r));
+  // New posts start moderation_status='pending' and are only visible to their own author until the
+  // (real, ~1-2s) moderation pipeline clears them -- wait before any other viewer acts on this one.
+  if (publicId) {
+    const deadline = Date.now() + 20000;
+    while (Date.now() < deadline) {
+      const row = (await pool.query("SELECT moderation_status FROM community_posts WHERE id = $1", [publicId])).rows[0];
+      if (row?.moderation_status === "allowed") break;
+      await new Promise((res) => setTimeout(res, 400));
+    }
+  }
   r = await call("POST", "/community/posts", tA, { mediaUrls: url1 ? [url1] : [], visibility: "public" });
   ok("a photo-only post is created (no text)", r.s === 201 && r.d?.postId, JSON.stringify(r));
   if (r.d?.postId) madePosts.push(r.d.postId);
@@ -107,6 +117,14 @@ let BIG; // a real ~1 MB PNG (uploads are re-encoded now, so a fake header no lo
   r = await call("POST", `/community/posts/${publicId}/comments`, tB, { body: "Nice one!" });
   ok("comment: can be added (was 500)", r.s === 201 && r.d?.id, JSON.stringify(r));
   const cid = r.d?.id;
+  if (cid) {
+    const deadline = Date.now() + 20000;
+    while (Date.now() < deadline) {
+      const row = (await pool.query("SELECT moderation_status FROM post_comments WHERE id = $1", [cid])).rows[0];
+      if (row?.moderation_status === "allowed") break;
+      await new Promise((res) => setTimeout(res, 400));
+    }
+  }
   r = await call("GET", `/community/posts/${publicId}/comments`, null);
   ok("comment: appears in the list with an author", r.s === 200 && r.d?.length === 1 && r.d[0].body === "Nice one!" && r.d[0].author_id === Bu.id, JSON.stringify(r).slice(0, 200));
   r = await call("GET", `/community/posts/${publicId}`, tA);

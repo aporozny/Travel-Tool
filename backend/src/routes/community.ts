@@ -8,6 +8,7 @@ import * as path from 'path';
 import * as crypto from 'crypto';
 import sharp from 'sharp';
 import { postCreateRateLimit, commentCreateRateLimit, uploadRateLimit } from '../middleware/rateLimit';
+import { moderateAndPersist, type ModerationImage } from '../services/moderation';
 
 export const communityRouter = Router();
 
@@ -44,10 +45,28 @@ const visibleToViewer = (post: string, viewer: string) => `((
       AND ((mc.requester_id = ${post}.author_id AND mc.recipient_id = ${viewer})
         OR (mc.recipient_id = ${post}.author_id AND mc.requester_id = ${viewer}))
   ))
-) AND ${notBlockedWith(`${post}.author_id`, viewer)})`;
+) AND ${notBlockedWith(`${post}.author_id`, viewer)}
+  AND (${post}.moderation_status = 'allowed' OR ${post}.author_id = ${viewer}))`;
 
 // Only files that came out of POST /community/upload may be attached to a post.
 const UPLOAD_URL_RE = /^\/uploads\/[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}\.(jpg|png|webp)$/;
+
+const EXT_TO_MIME: Record<string, ModerationImage['mimeType']> = {
+  jpg: 'image/jpeg',
+  png: 'image/png',
+  webp: 'image/webp',
+};
+
+// Reads a post's already-uploaded (already re-encoded/EXIF-stripped) images back off disk for the
+// moderation pipeline. Every mediaUrls entry has already passed UPLOAD_URL_RE, so its extension is
+// always one of jpg/png/webp -- a lookup miss here would mean that regex changed without this map.
+function loadImagesForModeration(mediaUrls: string[]): ModerationImage[] {
+  return mediaUrls.map((url) => {
+    const filename = path.basename(url);
+    const ext = filename.split('.').pop() ?? '';
+    return { data: fs.readFileSync(path.join(UPLOAD_DIR, filename)), mimeType: EXT_TO_MIME[ext] };
+  });
+}
 
 // Does the file's own first bytes match the type the client claims?
 function looksLikeImage(buf: Buffer, mimeType: string): boolean {
@@ -145,6 +164,7 @@ communityRouter.get('/feed', authenticate, async (req: AuthenticatedRequest, res
            ${region ? 'OR cp.region ILIKE $4' : ''}
          )
          AND ${notBlockedWith('cp.author_id', '$1::uuid')}
+         AND (cp.moderation_status = 'allowed' OR cp.author_id = $1)
        GROUP BY cp.id, u.id, t.display_name, t.avatar_url, t.nationality,
                 pc.name, pc.category, pr.reaction, ms.id
        ORDER BY cp.created_at DESC
@@ -200,6 +220,7 @@ communityRouter.get('/discover', optionalAuth, async (req: AuthenticatedRequest,
        LEFT JOIN post_reactions pr ON pr.post_id = cp.id AND pr.user_id = $1
        WHERE cp.is_deleted = FALSE AND cp.visibility = 'public'
          AND ${notBlockedWith('cp.author_id', '$1::uuid')}
+         AND (cp.moderation_status = 'allowed' OR cp.author_id = $1)
          ${region ? 'AND cp.region ILIKE $4' : ''}
        GROUP BY cp.id, u.id, t.display_name, t.avatar_url, t.nationality,
                 pc.name, pc.category, pr.reaction
@@ -288,6 +309,14 @@ communityRouter.post('/posts', authenticate, postCreateRateLimit, async (req: Au
       }
 
       await client.query('COMMIT');
+
+      void moderateAndPersist({
+        kind: 'post',
+        id: postId,
+        authorId: req.user!.id,
+        body: body.body ?? '',
+        images: loadImagesForModeration(body.mediaUrls ?? []),
+      }).catch((err) => console.error('moderateAndPersist (post) failed:', err));
 
       return res.status(201).json({
         postId,
@@ -431,6 +460,7 @@ communityRouter.get('/posts/:id/comments', optionalAuth, async (req: Authenticat
        WHERE pc.post_id = $1 AND pc.is_deleted = FALSE AND pc.is_hidden = FALSE
          AND cp.is_deleted = FALSE AND ${visibleToViewer('cp', '$2::uuid')}
          AND ${notBlockedWith('pc.user_id', '$2::uuid')}
+         AND (pc.moderation_status = 'allowed' OR pc.user_id = $2)
        ORDER BY pc.created_at ASC`,
       [req.params.id, req.user?.id ?? null]
     );
@@ -459,6 +489,14 @@ communityRouter.post('/posts/:id/comments', authenticate, commentCreateRateLimit
        RETURNING id, created_at`,
       [req.params.id, req.user!.id, body.body]
     );
+
+    void moderateAndPersist({
+      kind: 'comment',
+      id: result.rows[0].id,
+      authorId: req.user!.id,
+      body: body.body,
+      images: [],
+    }).catch((err) => console.error('moderateAndPersist (comment) failed:', err));
 
     return res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -567,6 +605,7 @@ communityRouter.get('/posts', authenticate, async (req: AuthenticatedRequest, re
        WHERE cp.author_id = $1 AND cp.is_deleted = FALSE
          AND (cp.visibility = 'public' OR cp.author_id = $2)
          AND ${notBlockedWith('cp.author_id', '$2::uuid')}
+         AND (cp.moderation_status = 'allowed' OR cp.author_id = $2)
        GROUP BY cp.id
        ORDER BY cp.created_at DESC
        LIMIT 50`,

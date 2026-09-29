@@ -13,6 +13,7 @@
     "postinstall": "node scripts/patchAnthropicPlugin.js"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.129.0",
     "@duffel/api": "^4.28.0",
     "@elevenlabs/elevenlabs-js": "^2.63.0",
     "@livekit/agents": "^1.6.3",

@@ -1,15 +1,3 @@
--- GENERATED FILE: this is a schema-only pg_dump of the live database, used by CI to build a
--- fresh test database that structurally matches production. Do not hand-edit it.
---
--- Regenerate after applying a new migration to production:
---   backend/scripts/refresh-ci-schema.sh
---
--- Why a dump instead of migrations/*.sql replayed onto an older schema.sql: this file went
--- stale for months while migrations were applied by hand to production, and migrations 008-020
--- were never saved as files at all, so this repo cannot fully reconstruct history -- only the
--- live database's current, real structure is trustworthy. Verified 2026-09-22: the full test
--- suite (175 tests) passes against a database built from this file alone.
---
 --
 -- PostgreSQL database dump
 --
@@ -297,8 +285,10 @@ CREATE TABLE public.community_posts (
     save_count integer DEFAULT 0 NOT NULL,
     is_deleted boolean DEFAULT false NOT NULL,
     operator_id uuid,
+    moderation_status text DEFAULT 'pending'::text NOT NULL,
     CONSTRAINT community_posts_author_type_check CHECK ((author_type = ANY (ARRAY['member'::text, 'operator'::text, 'system'::text]))),
     CONSTRAINT community_posts_body_check CHECK ((length(body) <= 2000)),
+    CONSTRAINT community_posts_moderation_status_check CHECK ((moderation_status = ANY (ARRAY['pending'::text, 'allowed'::text, 'held'::text, 'blocked'::text]))),
     CONSTRAINT community_posts_visibility_check CHECK ((visibility = ANY (ARRAY['public'::text, 'members'::text, 'connections'::text, 'private'::text])))
 );
 
@@ -553,6 +543,7 @@ CREATE TABLE public.markup_rules (
     active boolean DEFAULT true NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT markup_rules_markup_type_check CHECK ((markup_type = ANY (ARRAY['percentage'::text, 'fixed'::text]))),
+    CONSTRAINT markup_rules_route_fields_check CHECK ((((scope = 'route'::text) AND (route_origin IS NOT NULL) AND (route_destination IS NOT NULL) AND (route_origin ~ '^[A-Z]{3}$'::text) AND (route_destination ~ '^[A-Z]{3}$'::text)) OR ((scope <> 'route'::text) AND (route_origin IS NULL) AND (route_destination IS NULL)))),
     CONSTRAINT markup_rules_scope_check CHECK ((scope = ANY (ARRAY['global'::text, 'route'::text, 'cabin_class'::text])))
 );
 
@@ -725,6 +716,30 @@ CREATE TABLE public.member_trips (
 
 
 --
+-- Name: moderation_decisions; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.moderation_decisions (
+    id uuid DEFAULT public.uuid_generate_v4() NOT NULL,
+    post_id uuid,
+    comment_id uuid,
+    stage text NOT NULL,
+    verdict text NOT NULL,
+    categories text[] DEFAULT '{}'::text[] NOT NULL,
+    quoted_span text,
+    reason text NOT NULL,
+    policy_version text NOT NULL,
+    reviewer_id uuid,
+    reviewer_response text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT moderation_decisions_categories_required_check CHECK (((verdict = 'allowed'::text) OR (cardinality(categories) > 0))),
+    CONSTRAINT moderation_decisions_exactly_one_target CHECK ((((post_id IS NOT NULL) AND (comment_id IS NULL)) OR ((post_id IS NULL) AND (comment_id IS NOT NULL)))),
+    CONSTRAINT moderation_decisions_reviewer_fields_check CHECK ((((stage = 'human_review'::text) AND (reviewer_id IS NOT NULL)) OR ((stage <> 'human_review'::text) AND (reviewer_id IS NULL) AND (reviewer_response IS NULL)))),
+    CONSTRAINT moderation_decisions_verdict_check CHECK ((verdict = ANY (ARRAY['allowed'::text, 'held'::text, 'blocked'::text])))
+);
+
+
+--
 -- Name: notification_preferences; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -841,7 +856,9 @@ CREATE TABLE public.post_comments (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     is_deleted boolean DEFAULT false NOT NULL,
-    CONSTRAINT post_comments_body_check CHECK (((length(body) >= 1) AND (length(body) <= 1000)))
+    moderation_status text DEFAULT 'pending'::text NOT NULL,
+    CONSTRAINT post_comments_body_check CHECK (((length(body) >= 1) AND (length(body) <= 1000))),
+    CONSTRAINT post_comments_moderation_status_check CHECK ((moderation_status = ANY (ARRAY['pending'::text, 'allowed'::text, 'held'::text, 'blocked'::text])))
 );
 
 
@@ -982,7 +999,9 @@ CREATE TABLE public.safety_reports (
     severity smallint DEFAULT 2 NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    reported_place_cache_id uuid
+    reported_place_cache_id uuid,
+    reported_post_id uuid,
+    reported_comment_id uuid
 );
 
 
@@ -1605,6 +1624,14 @@ ALTER TABLE ONLY public.member_trips
 
 
 --
+-- Name: moderation_decisions moderation_decisions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.moderation_decisions
+    ADD CONSTRAINT moderation_decisions_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: notification_preferences notification_preferences_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2035,6 +2062,13 @@ CREATE INDEX idx_checkins_trip ON public.trip_checkins USING btree (trip_id);
 
 
 --
+-- Name: idx_comments_moderation_queue; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_comments_moderation_queue ON public.post_comments USING btree (created_at) WHERE (moderation_status = ANY (ARRAY['pending'::text, 'held'::text]));
+
+
+--
 -- Name: idx_comments_post; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -2287,6 +2321,20 @@ CREATE INDEX idx_messages_sender ON public.member_messages USING btree (sender_i
 
 
 --
+-- Name: idx_moderation_decisions_comment; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_moderation_decisions_comment ON public.moderation_decisions USING btree (comment_id, created_at DESC) WHERE (comment_id IS NOT NULL);
+
+
+--
+-- Name: idx_moderation_decisions_post; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_moderation_decisions_post ON public.moderation_decisions USING btree (post_id, created_at DESC) WHERE (post_id IS NOT NULL);
+
+
+--
 -- Name: idx_operators_category; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -2375,6 +2423,13 @@ CREATE INDEX idx_posts_author ON public.community_posts USING btree (author_id);
 --
 
 CREATE INDEX idx_posts_created ON public.community_posts USING btree (created_at DESC);
+
+
+--
+-- Name: idx_posts_moderation_queue; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_posts_moderation_queue ON public.community_posts USING btree (created_at) WHERE (moderation_status = ANY (ARRAY['pending'::text, 'held'::text]));
 
 
 --
@@ -2501,6 +2556,20 @@ CREATE INDEX idx_sos_ai_calls_user ON public.sos_ai_calls USING btree (user_id);
 --
 
 CREATE INDEX idx_sos_pings ON public.sos_location_pings USING btree (sos_id, created_at DESC);
+
+
+--
+-- Name: idx_sr_reported_comment; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_sr_reported_comment ON public.safety_reports USING btree (reported_comment_id) WHERE (reported_comment_id IS NOT NULL);
+
+
+--
+-- Name: idx_sr_reported_post; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_sr_reported_post ON public.safety_reports USING btree (reported_post_id) WHERE (reported_post_id IS NOT NULL);
 
 
 --
@@ -2676,6 +2745,34 @@ CREATE UNIQUE INDEX uq_flight_orders_payment_intent ON public.flight_orders USIN
 --
 
 CREATE UNIQUE INDEX uq_listing_claims_pending ON public.listing_claims USING btree (place_id, operator_id) WHERE (status = 'pending'::text);
+
+
+--
+-- Name: uq_markup_rules_one_active_global; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_markup_rules_one_active_global ON public.markup_rules USING btree (scope) WHERE ((scope = 'global'::text) AND (active = true));
+
+
+--
+-- Name: uq_markup_rules_one_active_per_route; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_markup_rules_one_active_per_route ON public.markup_rules USING btree (route_origin, route_destination) WHERE ((scope = 'route'::text) AND (active = true));
+
+
+--
+-- Name: uq_sr_reporter_comment; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_sr_reporter_comment ON public.safety_reports USING btree (reporter_id, reported_comment_id) WHERE (reported_comment_id IS NOT NULL);
+
+
+--
+-- Name: uq_sr_reporter_post; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_sr_reporter_post ON public.safety_reports USING btree (reporter_id, reported_post_id) WHERE (reported_post_id IS NOT NULL);
 
 
 --
@@ -2963,6 +3060,30 @@ ALTER TABLE ONLY public.member_trips
 
 
 --
+-- Name: moderation_decisions moderation_decisions_comment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.moderation_decisions
+    ADD CONSTRAINT moderation_decisions_comment_id_fkey FOREIGN KEY (comment_id) REFERENCES public.post_comments(id) ON DELETE CASCADE;
+
+
+--
+-- Name: moderation_decisions moderation_decisions_post_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.moderation_decisions
+    ADD CONSTRAINT moderation_decisions_post_id_fkey FOREIGN KEY (post_id) REFERENCES public.community_posts(id) ON DELETE CASCADE;
+
+
+--
+-- Name: moderation_decisions moderation_decisions_reviewer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.moderation_decisions
+    ADD CONSTRAINT moderation_decisions_reviewer_id_fkey FOREIGN KEY (reviewer_id) REFERENCES public.users(id);
+
+
+--
 -- Name: notification_preferences notification_preferences_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3131,6 +3252,14 @@ ALTER TABLE ONLY public.safety_contacts
 
 
 --
+-- Name: safety_reports safety_reports_reported_comment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.safety_reports
+    ADD CONSTRAINT safety_reports_reported_comment_id_fkey FOREIGN KEY (reported_comment_id) REFERENCES public.post_comments(id) ON DELETE CASCADE;
+
+
+--
 -- Name: safety_reports safety_reports_reported_operator_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3144,6 +3273,14 @@ ALTER TABLE ONLY public.safety_reports
 
 ALTER TABLE ONLY public.safety_reports
     ADD CONSTRAINT safety_reports_reported_place_cache_id_fkey FOREIGN KEY (reported_place_cache_id) REFERENCES public.places_cache(id);
+
+
+--
+-- Name: safety_reports safety_reports_reported_post_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.safety_reports
+    ADD CONSTRAINT safety_reports_reported_post_id_fkey FOREIGN KEY (reported_post_id) REFERENCES public.community_posts(id) ON DELETE CASCADE;
 
 
 --

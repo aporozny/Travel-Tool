@@ -16,6 +16,16 @@ const REGION = "P0TestRegion" + Date.now();
 let pass = 0, fail = 0;
 const ok = (name, cond, extra) => { cond ? pass++ : fail++; console.log(`${cond ? "PASS" : "FAIL"}  ${name}${cond ? "" : "  -> " + (extra ?? "")}`); };
 const tok = (u) => jwt.sign({ id: u.id, email: u.email, role: "traveler" }, process.env.JWT_SECRET, { expiresIn: "10m" });
+// New posts/comments start moderation_status='pending' and are only visible to their own author until
+// the (real, ~1-2s) moderation pipeline clears them -- wait for that before any cross-viewer check.
+async function waitForAllowed(table, id, timeoutMs = 20000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const row = (await pool.query(`SELECT moderation_status FROM ${table} WHERE id = $1`, [id])).rows[0];
+    if (row?.moderation_status === "allowed") return;
+    await new Promise((r) => setTimeout(r, 400));
+  }
+}
 async function call(method, p, token, body) {
   const r = await fetch(B + p, { method, headers: { "Content-Type": "application/json", ...(token ? { Authorization: "Bearer " + token } : {}) }, body: body === undefined ? undefined : JSON.stringify(body) });
   let d = null; try { d = await r.json(); } catch {}
@@ -83,6 +93,7 @@ const TINY_PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADU
     const pB = await post(tB, "P0 test post by B");
     const pC = await post(tC, "P0 test post by C");
     ok("test posts were created", !!pA && !!pB && !!pC, JSON.stringify({ pA, pB, pC }));
+    await Promise.all([pA, pB, pC].map((id) => waitForAllowed("community_posts", id)));
     const idsIn = (d) => (Array.isArray(d) ? d : d?.posts ?? []).map((p) => p.id);
 
     r = await call("GET", `/community/discover?region=${REGION}&limit=50`, tB);
@@ -94,6 +105,7 @@ const TINY_PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADU
     const cB = (await call("POST", `/community/posts/${pC}/comments`, tB, { body: "comment by B" })).d?.id;
     const cC = (await call("POST", `/community/posts/${pC}/comments`, tC, { body: "comment by C" })).d?.id;
     ok("three comments were placed on C's post", !!cA && !!cB && !!cC);
+    await Promise.all([cA, cB, cC].map((id) => waitForAllowed("post_comments", id)));
 
     r = await call("POST", `/members/${Bu.id}/block`, tA);
     ok("A blocks B through the real API", r.s === 204, JSON.stringify(r));
