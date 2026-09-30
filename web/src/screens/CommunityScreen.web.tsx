@@ -35,6 +35,15 @@ const PLACE_CATEGORIES = [
   { key: 'transport', label: 'Transport' },
 ];
 
+interface ModerationDecision {
+  stage: string;
+  verdict: string;
+  categories: string[];
+  quoted_span: string | null;
+  reason: string;
+  reviewer_question: string | null;
+}
+
 interface Post {
   id: string;
   body: string;
@@ -49,6 +58,10 @@ interface Post {
   media: string[];
   my_reaction: string | null;
   place_name: string | null;
+  // Only ever present for the viewer's own post -- the backend never returns another member's
+  // non-'allowed' content at all, so if this is set to anything but 'allowed', it's yours.
+  moderation_status?: 'pending' | 'held' | 'blocked' | 'allowed';
+  latest_moderation_decision?: ModerationDecision | null;
 }
 
 export default function CommunityScreen() {
@@ -191,6 +204,10 @@ function PostCard({ post, onReact, onComment }: {
 }) {
   const initials = (post.display_name || '?').split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase();
   const timeAgo = formatTimeAgo(post.created_at);
+  const [showReport, setShowReport] = useState(false);
+
+  // This only ever fires for the viewer's own post -- see the Post interface's own note.
+  const underReview = post.moderation_status && post.moderation_status !== 'allowed';
 
   return (
     <div style={styles.card}>
@@ -206,63 +223,236 @@ function PostCard({ post, onReact, onComment }: {
             <span style={styles.time}>{timeAgo}</span>
           </div>
         </div>
+        {!underReview && (
+          <button style={styles.reportLink} onClick={() => setShowReport(true)}>Report</button>
+        )}
       </div>
 
-      {/* Body */}
-      {post.body && (
-        <p style={styles.cardBody}>{post.body}</p>
-      )}
+      {underReview ? (
+        <ModerationBanner
+          status={post.moderation_status as 'pending' | 'held' | 'blocked'}
+          decision={post.latest_moderation_decision ?? null}
+          contentType="post"
+          contentId={post.id}
+        />
+      ) : (
+        <>
+          {/* Body */}
+          {post.body && (
+            <p style={styles.cardBody}>{post.body}</p>
+          )}
 
-      {/* Media */}
-      {post.media && post.media.length > 0 && (
-        <div style={styles.mediaGrid}>
-          {post.media.slice(0, 3).map((url: string, i: number) => (
-            <img
-              key={i}
-              src={url}
-              style={{
-                ...styles.mediaImg,
-                ...(post.media.length === 1 ? styles.mediaImgFull : {}),
-              }}
-              alt=""
-            />
-          ))}
-        </div>
-      )}
+          {/* Media */}
+          {post.media && post.media.length > 0 && (
+            <div style={styles.mediaGrid}>
+              {post.media.slice(0, 3).map((url: string, i: number) => (
+                <img
+                  key={i}
+                  src={url}
+                  style={{
+                    ...styles.mediaImg,
+                    ...(post.media.length === 1 ? styles.mediaImgFull : {}),
+                  }}
+                  alt=""
+                />
+              ))}
+            </div>
+          )}
 
-      {/* Place tag */}
-      {post.place_name && (
-        <div style={styles.placeTag}>
-          <span style={{ marginRight: 4 }}>◎</span>
-          {post.place_name}
-        </div>
-      )}
+          {/* Place tag */}
+          {post.place_name && (
+            <div style={styles.placeTag}>
+              <span style={{ marginRight: 4 }}>◎</span>
+              {post.place_name}
+            </div>
+          )}
 
-      {/* Reactions */}
-      <div style={styles.cardFooter}>
-        <div style={styles.reactions}>
-          {REACTIONS.map(r => (
-            <button
-              key={r.key}
-              style={{
-                ...styles.reactionBtn,
-                ...(post.my_reaction === r.key ? styles.reactionActive : {}),
-              }}
-              onClick={() => onReact(post.id, r.key)}
-              title={r.label}
-            >
-              {r.emoji}
+          {/* Reactions */}
+          <div style={styles.cardFooter}>
+            <div style={styles.reactions}>
+              {REACTIONS.map(r => (
+                <button
+                  key={r.key}
+                  style={{
+                    ...styles.reactionBtn,
+                    ...(post.my_reaction === r.key ? styles.reactionActive : {}),
+                  }}
+                  onClick={() => onReact(post.id, r.key)}
+                  title={r.label}
+                >
+                  {r.emoji}
+                </button>
+              ))}
+              {post.reaction_count > 0 && (
+                <span style={styles.reactionCount}>{post.reaction_count}</span>
+              )}
+            </div>
+
+            <button style={styles.commentBtn} onClick={onComment}>
+              <span style={{ marginRight: 4 }}>◇</span>
+              {post.comment_count > 0 ? post.comment_count : 'Comment'}
             </button>
-          ))}
-          {post.reaction_count > 0 && (
-            <span style={styles.reactionCount}>{post.reaction_count}</span>
+          </div>
+        </>
+      )}
+
+      {showReport && (
+        <ReportModal contentType="post" contentId={post.id} onClose={() => setShowReport(false)} />
+      )}
+    </div>
+  );
+}
+
+// ─── Moderation banner + report/appeal ─────────────────────────────────────────
+
+const MODERATION_CATEGORY_LABEL: Record<string, string> = {
+  harassment: 'Harassment or unsafe behaviour',
+  inappropriate_content: 'Inappropriate content',
+  scam: 'A scam or misleading offer',
+  other: 'Something else',
+};
+
+// Shown only to a post/comment's own author, in place of its normal content, when it isn't
+// currently visible to anyone else. Never deletes anything -- the draft stays exactly as written.
+function ModerationBanner({ status, decision, contentType, contentId, postId }: {
+  status: 'pending' | 'held' | 'blocked';
+  decision: ModerationDecision | null;
+  contentType: 'post' | 'comment';
+  contentId: string;
+  postId?: string; // required when contentType === 'comment'
+}) {
+  const [note, setNote] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [done, setDone] = useState(false);
+  const [error, setError] = useState('');
+  const [showForm, setShowForm] = useState(false);
+
+  const alreadyAppealed = decision?.stage === 'appeal_requested';
+  const path = contentType === 'post' ? `/community/posts/${contentId}/appeal` : `/community/posts/${postId}/comments/${contentId}/appeal`;
+
+  const submitAppeal = async () => {
+    if (!note.trim()) { setError('Add a line about why before asking for a review.'); return; }
+    setSubmitting(true);
+    setError('');
+    try {
+      await api.post(path, { note: note.trim() });
+      setDone(true);
+    } catch (e: any) {
+      setError(e?.response?.data?.message || 'Could not send that. Please try again.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div style={{ ...styles.moderationBanner, ...(status === 'blocked' ? styles.moderationBannerBlocked : {}) }}>
+      <p style={styles.moderationTitle}>
+        {status === 'blocked' ? 'This post was removed from view' : 'Your post is under review'}
+      </p>
+      {decision && decision.stage !== 'appeal_requested' && (
+        <>
+          {decision.categories.length > 0 && (
+            <p style={styles.moderationLine}>
+              Category: {decision.categories.map((c) => MODERATION_CATEGORY_LABEL[c] ?? c.replace(/_/g, ' ')).join(', ')}
+            </p>
+          )}
+          {decision.quoted_span && <p style={styles.moderationQuoted}>Flagged part: "{decision.quoted_span}"</p>}
+          <p style={styles.moderationLine}>Reason: {decision.reason}</p>
+        </>
+      )}
+      {status === 'pending' && !decision && (
+        <p style={styles.moderationLine}>Still being checked -- this usually takes a few seconds.</p>
+      )}
+
+      {status !== 'pending' && (
+        alreadyAppealed || done ? (
+          <p style={styles.moderationLine}>A review has been asked for -- you'll hear back once someone's looked at it.</p>
+        ) : showForm ? (
+          <div style={{ marginTop: 8 }}>
+            {error && <p style={styles.moderationError}>{error}</p>}
+            <textarea
+              style={styles.moderationNoteInput}
+              placeholder="Why should this be looked at again?"
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              rows={2}
+            />
+            <button style={styles.moderationBtn} disabled={submitting} onClick={submitAppeal}>
+              {submitting ? 'Sending...' : 'Send'}
+            </button>
+          </div>
+        ) : (
+          <button style={styles.moderationBtn} onClick={() => setShowForm(true)}>Ask for a review</button>
+        )
+      )}
+    </div>
+  );
+}
+
+function ReportModal({ contentType, contentId, postId, onClose }: {
+  contentType: 'post' | 'comment';
+  contentId: string;
+  postId?: string; // required when contentType === 'comment'
+  onClose: () => void;
+}) {
+  const [category, setCategory] = useState('harassment');
+  const [description, setDescription] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+  const [done, setDone] = useState(false);
+
+  const submit = async () => {
+    if (description.trim().length < 10) { setError('Say a bit more (at least 10 characters).'); return; }
+    setSubmitting(true);
+    setError('');
+    try {
+      const path = contentType === 'post' ? `/community/posts/${contentId}/report` : `/community/posts/${postId}/comments/${contentId}/report`;
+      await api.post(path, { category, description: description.trim() });
+      setDone(true);
+    } catch (e: any) {
+      setError(e?.response?.data?.message || 'Could not send that report. Please try again.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div style={styles.overlay} onClick={onClose}>
+      <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
+        <div style={styles.modalHeader}>
+          <h2 style={styles.modalTitle}>{done ? 'Report sent' : `Report this ${contentType}`}</h2>
+          <button style={styles.closeBtn} onClick={onClose}>✕</button>
+        </div>
+        <div style={{ padding: '16px 24px 24px' }}>
+          {done ? (
+            <>
+              <p style={{ fontSize: 14, color: C.text, marginBottom: 16 }}>Thanks -- our team will take a look.</p>
+              <button style={styles.postBtn} onClick={onClose}>Done</button>
+            </>
+          ) : (
+            <>
+              {error && <p style={styles.moderationError}>{error}</p>}
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: C.muted, marginBottom: 6 }}>Category</label>
+              <select style={styles.moderationSelect} value={category} onChange={(e) => setCategory(e.target.value)}>
+                <option value="harassment">Harassment or unsafe behaviour</option>
+                <option value="inappropriate_content">Inappropriate content</option>
+                <option value="scam">A scam or misleading offer</option>
+                <option value="other">Something else</option>
+              </select>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: C.muted, margin: '14px 0 6px' }}>What's wrong with it?</label>
+              <textarea
+                style={styles.moderationNoteInput}
+                rows={3}
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="A sentence or two is enough."
+              />
+              <button style={{ ...styles.postBtn, marginTop: 14 }} disabled={submitting} onClick={submit}>
+                {submitting ? 'Sending...' : 'Send report'}
+              </button>
+            </>
           )}
         </div>
-
-        <button style={styles.commentBtn} onClick={onComment}>
-          <span style={{ marginRight: 4 }}>◇</span>
-          {post.comment_count > 0 ? post.comment_count : 'Comment'}
-        </button>
       </div>
     </div>
   );
@@ -599,6 +789,7 @@ function CommentsModal({ postId, onClose }: { postId: string; onClose: () => voi
   const [comments, setComments] = useState<any[]>([]);
   const [newComment, setNewComment] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [reportingCommentId, setReportingCommentId] = useState<string | null>(null);
 
   useEffect(() => {
     api.get(`/community/posts/${postId}/comments`)
@@ -638,14 +829,30 @@ function CommentsModal({ postId, onClose }: { postId: string; onClose: () => voi
           ) : (
             comments.map(c => {
               const initials = (c.display_name || '?').split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase();
+              const underReview = c.moderation_status && c.moderation_status !== 'allowed';
               return (
                 <div key={c.id} style={styles.comment}>
                   <div style={{ ...styles.avatar, width: 28, height: 28, fontSize: 10 }}>{initials}</div>
-                  <div>
-                    <div style={{ fontSize: 12, fontWeight: 600, color: C.text, marginBottom: 2 }}>
-                      {c.display_name || 'Member'}
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: C.text, marginBottom: 2 }}>
+                        {c.display_name || 'Member'}
+                      </div>
+                      {!underReview && (
+                        <button style={styles.reportLinkSmall} onClick={() => setReportingCommentId(c.id)}>Report</button>
+                      )}
                     </div>
-                    <div style={{ fontSize: 14, color: C.text, lineHeight: 1.5 }}>{c.body}</div>
+                    {underReview ? (
+                      <ModerationBanner
+                        status={c.moderation_status}
+                        decision={c.latest_moderation_decision ?? null}
+                        contentType="comment"
+                        contentId={c.id}
+                        postId={postId}
+                      />
+                    ) : (
+                      <div style={{ fontSize: 14, color: C.text, lineHeight: 1.5 }}>{c.body}</div>
+                    )}
                   </div>
                 </div>
               );
@@ -670,6 +877,10 @@ function CommentsModal({ postId, onClose }: { postId: string; onClose: () => voi
           </button>
         </div>
       </div>
+
+      {reportingCommentId && (
+        <ReportModal contentType="comment" contentId={reportingCommentId} postId={postId} onClose={() => setReportingCommentId(null)} />
+      )}
     </div>
   );
 }
@@ -782,6 +993,41 @@ const styles: Record<string, React.CSSProperties> = {
     background: 'transparent', border: 'none', cursor: 'pointer',
     fontSize: 13, color: C.muted, padding: '4px 8px', borderRadius: 8,
     display: 'flex', alignItems: 'center',
+  },
+
+  reportLink: {
+    background: 'none', border: 'none', cursor: 'pointer',
+    fontSize: 12, color: C.muted, padding: '4px 6px', flexShrink: 0,
+  },
+  reportLinkSmall: {
+    background: 'none', border: 'none', cursor: 'pointer',
+    fontSize: 11, color: C.muted, padding: '2px 4px',
+  },
+
+  // Moderation banner (author-only, replaces a held/blocked post or comment's normal content)
+  moderationBanner: {
+    background: C.goldLight, border: `1px solid ${C.gold}`, borderRadius: 12,
+    padding: 14, marginBottom: 4,
+  },
+  moderationBannerBlocked: {
+    background: '#FFEBEE', border: '1px solid #C62828',
+  },
+  moderationTitle: { fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 6 },
+  moderationLine: { fontSize: 13, color: C.text, marginBottom: 4, lineHeight: 1.5 },
+  moderationQuoted: { fontSize: 13, color: '#C62828', fontStyle: 'italic', marginBottom: 4 },
+  moderationError: { fontSize: 13, color: '#C62828', marginBottom: 8 },
+  moderationNoteInput: {
+    width: '100%', padding: '8px 10px', borderRadius: 8, border: `1px solid ${C.border}`,
+    fontSize: 13, color: C.text, fontFamily: 'inherit', resize: 'vertical' as const,
+    boxSizing: 'border-box' as const, marginBottom: 8,
+  },
+  moderationSelect: {
+    width: '100%', padding: '9px 10px', borderRadius: 8, border: `1px solid ${C.border}`,
+    fontSize: 14, color: C.text, background: C.white,
+  },
+  moderationBtn: {
+    padding: '8px 16px', background: C.gold, color: '#fff', border: 'none',
+    borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer',
   },
 
   // Compose modal

@@ -142,6 +142,7 @@ communityRouter.get('/feed', authenticate, async (req: AuthenticatedRequest, res
          cp.save_count,
          cp.created_at,
          cp.author_type,
+         cp.moderation_status,
          -- Author info
          u.id AS author_id,
          t.display_name,
@@ -158,7 +159,14 @@ communityRouter.get('/feed', authenticate, async (req: AuthenticatedRequest, res
          -- Viewer's reaction
          pr.reaction AS my_reaction,
          -- Viewer's save
-         CASE WHEN ms.id IS NOT NULL THEN true ELSE false END AS is_saved
+         CASE WHEN ms.id IS NOT NULL THEN true ELSE false END AS is_saved,
+         -- Only ever populated for the viewer's own non-allowed post (everyone else's rows here are
+         -- always 'allowed', per the WHERE clause below) -- what the author's "under review" banner
+         -- needs. A scalar subquery, not a LATERAL join, so it slots in without touching GROUP BY.
+         (SELECT row_to_json(d) FROM (
+            SELECT stage, verdict, categories, quoted_span, reason, reviewer_question
+            FROM moderation_decisions WHERE post_id = cp.id ORDER BY created_at DESC LIMIT 1
+          ) d) AS latest_moderation_decision
        FROM community_posts cp
        JOIN users u ON u.id = cp.author_id
        LEFT JOIN travelers t ON t.user_id = cp.author_id
@@ -215,6 +223,7 @@ communityRouter.get('/discover', optionalAuth, async (req: AuthenticatedRequest,
          cp.save_count,
          cp.created_at,
          cp.author_type,
+         cp.moderation_status,
          u.id AS author_id,
          t.display_name,
          t.avatar_url,
@@ -225,7 +234,11 @@ communityRouter.get('/discover', optionalAuth, async (req: AuthenticatedRequest,
            json_agg(pm.url ORDER BY pm.sort_order) FILTER (WHERE pm.id IS NOT NULL),
            '[]'
          ) AS media,
-         pr.reaction AS my_reaction
+         pr.reaction AS my_reaction,
+         (SELECT row_to_json(d) FROM (
+            SELECT stage, verdict, categories, quoted_span, reason, reviewer_question
+            FROM moderation_decisions WHERE post_id = cp.id ORDER BY created_at DESC LIMIT 1
+          ) d) AS latest_moderation_decision
        FROM community_posts cp
        JOIN users u ON u.id = cp.author_id
        LEFT JOIN travelers t ON t.user_id = cp.author_id
@@ -370,7 +383,11 @@ communityRouter.get('/posts/:id', optionalAuth, async (req: AuthenticatedRequest
            json_agg(pm.url ORDER BY pm.sort_order) FILTER (WHERE pm.id IS NOT NULL),
            '[]'
          ) AS media,
-         pr.reaction AS my_reaction
+         pr.reaction AS my_reaction,
+         (SELECT row_to_json(d) FROM (
+            SELECT stage, verdict, categories, quoted_span, reason, reviewer_question
+            FROM moderation_decisions WHERE post_id = cp.id ORDER BY created_at DESC LIMIT 1
+          ) d) AS latest_moderation_decision
        FROM community_posts cp
        JOIN users u ON u.id = cp.author_id
        LEFT JOIN travelers t ON t.user_id = cp.author_id
@@ -464,9 +481,14 @@ communityRouter.get('/posts/:id/comments', optionalAuth, async (req: Authenticat
          pc.id,
          pc.body,
          pc.created_at,
+         pc.moderation_status,
          u.id AS author_id,
          t.display_name,
-         t.avatar_url
+         t.avatar_url,
+         (SELECT row_to_json(d) FROM (
+            SELECT stage, verdict, categories, quoted_span, reason, reviewer_question
+            FROM moderation_decisions WHERE comment_id = pc.id ORDER BY created_at DESC LIMIT 1
+          ) d) AS latest_moderation_decision
        FROM post_comments pc
        JOIN community_posts cp ON cp.id = pc.post_id
        JOIN users u ON u.id = pc.user_id
@@ -766,11 +788,15 @@ communityRouter.get('/posts', authenticate, async (req: AuthenticatedRequest, re
     const result = await pool.query(
       `SELECT
          cp.id, cp.body, cp.region, cp.reaction_count,
-         cp.comment_count, cp.created_at,
+         cp.comment_count, cp.created_at, cp.moderation_status,
          COALESCE(
            json_agg(pm.url ORDER BY pm.sort_order) FILTER (WHERE pm.id IS NOT NULL),
            '[]'
-         ) AS media
+         ) AS media,
+         (SELECT row_to_json(d) FROM (
+            SELECT stage, verdict, categories, quoted_span, reason, reviewer_question
+            FROM moderation_decisions WHERE post_id = cp.id ORDER BY created_at DESC LIMIT 1
+          ) d) AS latest_moderation_decision
        FROM community_posts cp
        LEFT JOIN post_media pm ON pm.post_id = cp.id
        WHERE cp.author_id = $1 AND cp.is_deleted = FALSE
