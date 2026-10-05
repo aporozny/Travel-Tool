@@ -135,6 +135,18 @@ bookingsRouter.get('/', authenticate, async (req: AuthenticatedRequest, res: Res
          ORDER BY b.created_at DESC`,
         [req.user!.id]
       );
+    } else if (req.user!.role === 'admin') {
+      result = await pool.query(
+        `SELECT b.id, b.status, b.start_date, b.end_date, b.guests,
+                b.total_amount, b.currency, b.notes, b.created_at,
+                o.id AS operator_id, o.business_name, o.category, o.region,
+                t.first_name, t.last_name, u.email AS traveler_email
+         FROM bookings b
+         JOIN operators o ON o.id = b.operator_id
+         JOIN travelers t ON t.id = b.traveler_id
+         JOIN users u ON u.id = t.user_id
+         ORDER BY b.created_at DESC`
+      );
     } else {
       return res.status(403).json({ message: 'Forbidden' });
     }
@@ -168,11 +180,13 @@ bookingsRouter.get('/:id', authenticate, async (req: AuthenticatedRequest, res: 
 
     const booking = result.rows[0];
 
-    // Only the traveler or the operator involved can view it - use ID not email
+    // Only the traveler or the operator involved can view it - use ID not email.
+    // Admins can view any booking.
     const isTraveler = req.user!.role === 'traveler' && booking.traveler_user_id === req.user!.id;
     const isOperator = req.user!.role === 'operator' && booking.operator_user_id === req.user!.id;
+    const isAdmin = req.user!.role === 'admin';
 
-    if (!isTraveler && !isOperator) {
+    if (!isTraveler && !isOperator && !isAdmin) {
       return res.status(403).json({ message: 'Forbidden' });
     }
 

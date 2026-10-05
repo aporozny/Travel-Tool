@@ -94,8 +94,8 @@ export default function AppShell() {
     switch (tab) {
       case 'community': return <CommunityScreen />;
       case 'trips':     return <TripsScreen />;
-      case 'flights':   return FLIGHTS_STAYS_LIVE ? <FlightsScreen /> : <ComingSoonScreen kind="flights" />;
-      case 'stays':     return FLIGHTS_STAYS_LIVE ? <StaysScreen /> : <ComingSoonScreen kind="stays" />;
+      case 'flights':   return (FLIGHTS_STAYS_LIVE || isAdmin) ? <FlightsScreen /> : <ComingSoonScreen kind="flights" />;
+      case 'stays':     return (FLIGHTS_STAYS_LIVE || isAdmin) ? <StaysScreen /> : <ComingSoonScreen kind="stays" />;
       case 'explore':   return <ExploreScreen />;
       // An operator's bookings (with Confirm / Decline / Mark completed) live on the dashboard's Bookings tab.
       // (the keys make React start a fresh screen on the right tab when switching between the two menu items)
