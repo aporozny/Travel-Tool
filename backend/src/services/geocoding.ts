@@ -157,3 +157,41 @@ export async function reverseGeocodeCountry(
 		return null;
 	}
 }
+
+export interface ReverseAddressResult {
+	formattedAddress: string;
+}
+
+/**
+ * Reverse-geocode a lat/lng to a human-readable street address, for showing
+ * a safety reviewer exactly where a caller was last seen. Deliberately NOT
+ * cached like reverseGeocodeCountry: a stale cached address for a
+ * high-stakes "find this person right now" lookup is actively dangerous in
+ * a way a stale cached country isn't, and this only ever fires on a real
+ * Safety Line escalation, so there's no volume to justify the risk.
+ * Returns null on failure -- callers must fall back to raw coordinates.
+ */
+export async function reverseGeocodeAddress(
+	lat: number,
+	lng: number,
+): Promise<ReverseAddressResult | null> {
+	if (!GOOGLE_API_KEY) return null;
+
+	try {
+		const { data } = await axios.get(
+			"https://maps.googleapis.com/maps/api/geocode/json",
+			{ params: { latlng: `${lat},${lng}`, key: GOOGLE_API_KEY, language: "en" } },
+		);
+		if (data.status !== "OK" || !data.results?.length) return null;
+
+		return { formattedAddress: data.results[0].formatted_address };
+	} catch (err) {
+		console.error(
+			"Reverse address geocoding failed for",
+			lat,
+			lng,
+			err instanceof Error ? err.message : err,
+		);
+		return null;
+	}
+}

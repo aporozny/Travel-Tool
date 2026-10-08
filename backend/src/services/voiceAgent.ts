@@ -1,7 +1,7 @@
 import { pool } from "../utils/db";
 import { redis } from "../utils/redis";
 import { sendSOSAlert, sendReviewerAlert } from "./notifications";
-import { reverseGeocodeCountry } from "./geocoding";
+import { reverseGeocodeCountry, reverseGeocodeAddress } from "./geocoding";
 import { safetyEmitter } from "../routes/safety";
 
 // Backend for the Drift Safety Line (inbound voice AI, see
@@ -126,6 +126,60 @@ export async function getCallerLastLocation(userId: string): Promise<CallerLocat
 	};
 }
 
+export interface CallerPreciseLocation {
+	latitude: number;
+	longitude: number;
+	address: string | null;
+	recordedAt: string;
+}
+
+// Full-precision counterpart to getCallerLastLocation, for the one path
+// where a human actually needs to go find this specific person: a live
+// transfer or an escalated call. Reviewer-facing only -- never spoken by
+// the AI agent itself as fact. Address resolution is best-effort; a miss
+// still returns the raw coordinates, which are enough for a maps link.
+export async function getCallerPreciseLocation(userId: string): Promise<CallerPreciseLocation | null> {
+	const cached = await redis.get(`location:${userId}`);
+	if (!cached) return null;
+
+	const parsed = JSON.parse(cached);
+	let address: string | null = null;
+	try {
+		const reverse = await reverseGeocodeAddress(parsed.latitude, parsed.longitude);
+		address = reverse?.formattedAddress ?? null;
+	} catch (err) {
+		console.error("getCallerPreciseLocation: address lookup failed", err);
+	}
+
+	return {
+		latitude: parsed.latitude,
+		longitude: parsed.longitude,
+		address,
+		recordedAt: parsed.recorded_at,
+	};
+}
+
+export function describeAge(recordedAt: string): string {
+	const ms = Date.now() - new Date(recordedAt).getTime();
+	if (!Number.isFinite(ms) || ms < 0) return "time unknown";
+	const minutes = Math.round(ms / 60000);
+	if (minutes < 1) return "under a minute ago";
+	if (minutes === 1) return "1 minute ago";
+	if (minutes < 60) return `${minutes} minutes ago`;
+	const hours = Math.round(minutes / 60);
+	return hours === 1 ? "1 hour ago" : `${hours} hours ago`;
+}
+
+// One-line reviewer-facing summary: address (if resolved), a maps link, and
+// how stale the ping is, phrased so nobody mistakes a Trip Mode ping for
+// the caller's exact live position -- Trip Mode only pings every 5 minutes
+// or 250m moved (see utils/geoPresence.ts), so it can be meaningfully behind.
+export function describeCallerLocation(location: CallerPreciseLocation): string {
+	const mapsUrl = `https://maps.google.com/?q=${location.latitude},${location.longitude}`;
+	const addressPart = location.address ? `${location.address} -- ` : "";
+	return `Last known location (Drift Trip Mode, ${describeAge(location.recordedAt)}): ${addressPart}${mapsUrl}. Trip Mode only updates every 5 minutes or 250m moved, so confirm with the caller rather than treating this as their exact current position.`;
+}
+
 export interface EmergencyNumberEntry {
 	serviceType: string;
 	number: string;
@@ -221,10 +275,8 @@ export async function pageReviewerForLiveTransfer(callId: string): Promise<void>
 	let locationLine = "";
 	if (call?.user_id) {
 		try {
-			const location = await getCallerLastLocation(call.user_id);
-			if (location) {
-				locationLine = `\nLast known location (Drift Trip Mode): ${location.countryName}, as of ${location.recordedAt} -- treat as a hint to confirm, not a fact.`;
-			}
+			const location = await getCallerPreciseLocation(call.user_id);
+			if (location) locationLine = `\n${describeCallerLocation(location)}`;
 		} catch (err) {
 			console.error("pageReviewerForLiveTransfer: location lookup failed", err);
 		}
@@ -284,9 +336,23 @@ export async function endCall(params: EndCallParams): Promise<EndCallResult> {
 	);
 	await pool.query(`UPDATE sos_ai_calls SET human_notified_at = NOW() WHERE id = $1`, [params.callId]);
 
+	// Same precise-location lookup the live-transfer page uses, fetched once
+	// and reused for both the caller's own safety contacts and the reviewer
+	// alert below -- a call escalated after the caller hung up still deserves
+	// the same location data a live transfer gets.
+	let preciseLocation: CallerPreciseLocation | null = null;
+	if (call.user_id) {
+		try {
+			preciseLocation = await getCallerPreciseLocation(call.user_id);
+		} catch (err) {
+			console.error("endCall: location lookup failed", err);
+		}
+	}
+
 	// Notify the caller's own safety contacts through the same channel
 	// (and the same sos_responders audit log) as a button-triggered SOS --
-	// an AI-relayed call is not a lesser-grade alert.
+	// an AI-relayed call is not a lesser-grade alert, so it gets the same
+	// location data a button-triggered SOS already includes.
 	if (call.user_id) {
 		const contactsResult = await pool.query(
 			`SELECT id, name, email, phone FROM safety_contacts WHERE user_id = $1 AND receives_sos = true`,
@@ -297,8 +363,8 @@ export async function endCall(params: EndCallParams): Promise<EndCallResult> {
 				sosId: call.sos_event_id,
 				travelerName,
 				travelerEmail: call.email,
-				latitude: null,
-				longitude: null,
+				latitude: preciseLocation?.latitude ?? null,
+				longitude: preciseLocation?.longitude ?? null,
 				message: `Drift Safety Line AI call. Outcome: ${params.outcome ?? "unclear"}.`,
 				contacts: contactsResult.rows,
 			}).catch((err) => console.error("Voice agent SOS notification failed:", err));
@@ -312,6 +378,7 @@ export async function endCall(params: EndCallParams): Promise<EndCallResult> {
 			`Phone: ${call.caller_phone}`,
 			`Outcome: ${params.outcome ?? "unclear — treat as urgent"}`,
 			`sos_events: ${call.sos_event_id}`,
+			...(preciseLocation ? [describeCallerLocation(preciseLocation)] : []),
 		].join("\n"),
 		urgent: params.outcome === "genuine_emergency" || params.outcome === "unclear_escalated" || !params.outcome,
 	}).catch((err) => console.error("Voice agent reviewer alert failed:", err));

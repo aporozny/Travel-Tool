@@ -6,10 +6,12 @@
  * not silently do nothing. A false "don't escalate" here means a real
  * emergency call ends with nobody paged.
  */
-import { decideEscalation, endCall } from "../src/services/voiceAgent";
+import { decideEscalation, endCall, describeAge, describeCallerLocation } from "../src/services/voiceAgent";
 import { pool } from "../src/utils/db";
+import { redis } from "../src/utils/redis";
 import { sendSOSAlert, sendReviewerAlert } from "../src/services/notifications";
 import { safetyEmitter } from "../src/routes/safety";
+import { reverseGeocodeAddress } from "../src/services/geocoding";
 
 jest.mock("../src/utils/db", () => ({ pool: { query: jest.fn() } }));
 jest.mock("../src/utils/redis", () => ({
@@ -20,8 +22,13 @@ jest.mock("../src/services/notifications", () => ({
 	sendReviewerAlert: jest.fn().mockResolvedValue(undefined),
 }));
 jest.mock("../src/routes/safety", () => ({ safetyEmitter: { emit: jest.fn() } }));
+jest.mock("../src/services/geocoding", () => ({
+	reverseGeocodeCountry: jest.fn().mockResolvedValue(null),
+	reverseGeocodeAddress: jest.fn().mockResolvedValue(null),
+}));
 
 const mockedQuery = pool.query as jest.Mock;
+const mockedRedisGet = redis.get as jest.Mock;
 
 function callRow(overrides: Partial<Record<string, any>> = {}) {
 	return {
@@ -65,8 +72,10 @@ describe("decideEscalation", () => {
 describe("endCall", () => {
 	beforeEach(() => {
 		mockedQuery.mockReset();
+		mockedRedisGet.mockReset();
 		(sendSOSAlert as jest.Mock).mockClear();
 		(sendReviewerAlert as jest.Mock).mockClear();
+		(reverseGeocodeAddress as jest.Mock).mockClear();
 	});
 
 	it("false_alarm: updates the call row but never touches sos_events, never pages anyone", async () => {
@@ -141,5 +150,91 @@ describe("endCall", () => {
 	it("throws if the call row doesn't exist -- never silently no-ops on a bad callId", async () => {
 		mockedQuery.mockResolvedValueOnce({ rows: [] });
 		await expect(endCall({ callId: "missing", outcome: "genuine_emergency", transcript: null })).rejects.toThrow();
+	});
+
+	it("cached location present: passes real coordinates to the SOS alert (not the old hardcoded null,null) and adds a location line to the reviewer alert", async () => {
+		mockedRedisGet.mockResolvedValueOnce(
+			JSON.stringify({ latitude: -8.409518, longitude: 115.188919, recorded_at: "2026-09-30T12:00:00.000Z" }),
+		);
+		(reverseGeocodeAddress as jest.Mock).mockResolvedValueOnce({ formattedAddress: "Kuta, Bali, Indonesia" });
+		mockedQuery
+			.mockResolvedValueOnce({ rows: [callRow()] })
+			.mockResolvedValueOnce({ rows: [] })
+			.mockResolvedValueOnce({ rows: [] })
+			.mockResolvedValueOnce({ rows: [] })
+			.mockResolvedValueOnce({
+				rows: [{ id: "contact-1", name: "Alex", email: "alex@example.com", phone: "+61400000001" }],
+			});
+
+		await endCall({ callId: "call-1", outcome: "genuine_emergency", transcript: "help" });
+
+		expect(sendSOSAlert).toHaveBeenCalledWith(
+			expect.objectContaining({ latitude: -8.409518, longitude: 115.188919 }),
+		);
+		expect(sendReviewerAlert).toHaveBeenCalledWith(
+			expect.objectContaining({
+				body: expect.stringContaining("Kuta, Bali, Indonesia -- https://maps.google.com/?q=-8.409518,115.188919"),
+			}),
+		);
+	});
+
+	it("no cached location: falls back to null,null for the SOS alert and omits the location line, same as before this feature existed", async () => {
+		mockedRedisGet.mockResolvedValueOnce(null);
+		mockedQuery
+			.mockResolvedValueOnce({ rows: [callRow()] })
+			.mockResolvedValueOnce({ rows: [] })
+			.mockResolvedValueOnce({ rows: [] })
+			.mockResolvedValueOnce({ rows: [] })
+			.mockResolvedValueOnce({
+				rows: [{ id: "contact-1", name: "Alex", email: "alex@example.com", phone: "+61400000001" }],
+			});
+
+		await endCall({ callId: "call-1", outcome: "genuine_emergency", transcript: "help" });
+
+		expect(sendSOSAlert).toHaveBeenCalledWith(expect.objectContaining({ latitude: null, longitude: null }));
+		expect(sendReviewerAlert).toHaveBeenCalledWith(
+			expect.objectContaining({ body: expect.not.stringContaining("Last known location") }),
+		);
+	});
+});
+
+describe("describeAge", () => {
+	it("formats sub-minute, minute, and hour buckets", () => {
+		const now = Date.now();
+		expect(describeAge(new Date(now - 10_000).toISOString())).toBe("under a minute ago");
+		expect(describeAge(new Date(now - 60_000).toISOString())).toBe("1 minute ago");
+		expect(describeAge(new Date(now - 6 * 60_000).toISOString())).toBe("6 minutes ago");
+		expect(describeAge(new Date(now - 60 * 60_000).toISOString())).toBe("1 hour ago");
+		expect(describeAge(new Date(now - 3 * 60 * 60_000).toISOString())).toBe("3 hours ago");
+	});
+
+	it("an unparseable or future timestamp reports 'time unknown' instead of a nonsense negative duration", () => {
+		expect(describeAge("not-a-date")).toBe("time unknown");
+		expect(describeAge(new Date(Date.now() + 60_000).toISOString())).toBe("time unknown");
+	});
+});
+
+describe("describeCallerLocation", () => {
+	it("includes the address, a maps link built from the raw coordinates, and the Trip Mode staleness caveat", () => {
+		const line = describeCallerLocation({
+			latitude: -8.409518,
+			longitude: 115.188919,
+			address: "Kuta, Bali, Indonesia",
+			recordedAt: new Date(Date.now() - 6 * 60_000).toISOString(),
+		});
+		expect(line).toContain("Kuta, Bali, Indonesia -- https://maps.google.com/?q=-8.409518,115.188919");
+		expect(line).toContain("6 minutes ago");
+		expect(line).toContain("confirm with the caller");
+	});
+
+	it("still produces a usable maps link when the address can't be resolved -- the coordinates alone are enough to find someone", () => {
+		const line = describeCallerLocation({
+			latitude: -8.409518,
+			longitude: 115.188919,
+			address: null,
+			recordedAt: new Date(Date.now() - 6 * 60_000).toISOString(),
+		});
+		expect(line).toContain("https://maps.google.com/?q=-8.409518,115.188919");
+		expect(line).not.toContain("--");
 	});
 });
