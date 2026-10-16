@@ -73,3 +73,32 @@ From [anthropics/skills](https://github.com/anthropics/skills) at upstream commi
 ## Evaluated and declined: Egonex-AI/Understand-Anything
 
 [Egonex-AI/Understand-Anything](https://github.com/Egonex-AI/Understand-Anything) (MIT, commit `6df3065`) was reviewed and **not installed** (owner's decision, 2026-09-28). It's a whole plugin (a tree-sitter core package plus a dashboard app), so it can't be vendored piece by piece. Review notes for anyone reconsidering: it has no telemetry, and its only outbound call is the opt-in Figma API. Its SessionStart and PostToolUse hooks do nothing unless `.ua/config.json` sets `autoUpdate: true`. When enabled, they tell the agent to re-analyze without asking, on every session start and every commit, so leave it off. To try it locally: `/plugin marketplace add Egonex-AI/Understand-Anything`, then `/plugin install understand-anything`.
+
+## Plugins enabled from the official marketplace (anthropics/claude-plugins-official)
+
+Enabled for this project in `.claude/settings.json` (`enabledPlugins`, marketplace `claude-plugins-official`, reviewed at commit `87bc24a`, 2026-10-15). Plugins install on the next session start, and Claude Code may ask you to trust them first.
+
+| Plugin | What it adds | Notes |
+|---|---|---|
+| `commit-commands` | `/commit`, `/commit-push-pr`, `/clean_gone` | Commands only |
+| `feature-dev` | `/feature-dev` workflow with explorer, architect and reviewer agents | Agents are namespaced (`feature-dev:code-reviewer`), so they don't clash with the ECC `code-reviewer` |
+| `claude-md-management` | `/revise-claude-md` and a CLAUDE.md auditing skill | The repo has no CLAUDE.md yet |
+| `claude-code-setup` | Recommends hooks, skills and MCP servers for the codebase | Read-only advice |
+| `security-guidance` | Regex warnings on edits, plus an agentic Opus review on each `git commit` | **`ENABLE_STOP_REVIEW=0`** is set in `settings.json` to turn off its *per-turn* Opus diff review, which costs tokens every turn. Commit review stays on. Project rules: `.claude/claude-security-guidance.md`. It sends diffs to the Anthropic API. |
+| `typescript-lsp` | Go-to-definition, references and diagnostics through `typescript-language-server` | Needs the binary. A SessionStart hook in `settings.json` installs `typescript-language-server@6.0.2` and `typescript@5.9.3` (pinned to match the repo), **only in cloud sessions**; on your own machine, run `npm i -g typescript-language-server typescript` once. |
+| `context7` | Up-to-date library docs over a remote MCP server (`mcp.context7.com`) | Anonymous. It receives library names and queries, not your code. |
+
+To turn one off for yourself only, set it to `false` under `enabledPlugins` in `.claude/settings.local.json`.
+
+**Not enabled, and why:** `pr-review-toolkit`, `code-review`, `code-simplifier` and `frontend-design` (duplicates of the vendored ECC agents, the built-in `/code-review` and `/simplify`, and the vendored skill); `playwright` (its MCP is unpinned `@playwright/mcp@latest`, and `webapp-testing` covers it); `hookify` (no rules defined yet); `github` (cloud sessions already have GitHub access); `redis-development` (overlaps `redis-patterns` and is mostly vector-search content); the full `stripe` plugin (see `stripe-best-practices`); the 15+ LSPs for other languages; and the roughly 250 third-party product integrations that need accounts the app doesn't use.
+
+### Skills vendored from external plugins
+
+| Skill | From | Notes |
+|---|---|---|
+| `stripe-best-practices` | [stripe/ai](https://github.com/stripe/ai) @ `97b2164` (MIT) | Plugin not enabled: its hooks ask for feedback in about 1% of all turns, it reports usage through the CLI, and its MCP acts on the live account. Links now point at the bundled references. |
+| `twilio-sendgrid-email-send`, `twilio-sendgrid-deliverability-advisor`, `twilio-security-hardening` | [twilio/ai](https://github.com/twilio/ai) @ `8aba46f` (MIT) | 3 of 57 skills, matched to actual use: SendGrid email and the Twilio SIP trunk. SMS uses Mobile Message. |
+
+## Also vendored: JuliusBrussee/caveman
+
+`caveman` skill only, from [JuliusBrussee/caveman](https://github.com/JuliusBrussee/caveman) @ `d262ab3` (Apache-2.0, with `LICENSE` and `NOTICE` alongside). **Changed to opt-in** (`disable-model-invocation: true`): type `/caveman` for terse answers, and "stop caveman" to go back. The plugin itself was not installed. It switches on at every session *and subagent* start, which would override the owner's preference for full answers and make reviewer reports terse. Its own benchmark shows only about 3% saving over a plain "answer concisely". The CLI, proxy, model auto-picker and hooks were left out too.
