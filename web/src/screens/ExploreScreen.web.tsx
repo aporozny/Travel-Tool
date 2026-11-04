@@ -502,6 +502,10 @@ export default function ExploreScreen() {
 	const [spotlight, setSpotlight] = useState<any[]>([]);
 	const [spotlightLoading, setSpotlightLoading] = useState(false);
 	const [search, setSearch] = useState("");
+	// Server-side text search (GET /search) for the search box. Null means "not
+	// searching", so the box falls back to filtering the loaded results.
+	const [searchResults, setSearchResults] = useState<any[] | null>(null);
+	const [searching, setSearching] = useState(false);
 	const [saves, setSaves] = useState<Set<string>>(new Set());
 	const [selected, setSelected] = useState<any>(null);
 	const [activeTrips, setActiveTrips] = useState<any[]>([]);
@@ -671,6 +675,49 @@ export default function ExploreScreen() {
 			.finally(() => setSpotlightLoading(false));
 	}, [region, category, search]);
 
+	// Search box -> GET /search. Waits for a pause in typing and at least 2
+	// characters, because a search can top up a thin catalog from paid live
+	// sources. Needs a destination: without one the backend would assume Bali.
+	const searchTerm = search.trim();
+	useEffect(() => {
+		if (searchTerm.length < 2 || !region) {
+			setSearchResults(null);
+			setSearching(false);
+			return;
+		}
+		let cancelled = false;
+		setSearching(true);
+		const timer = setTimeout(() => {
+			const params: any = { q: searchTerm, region, limit: RESULTS_PAGE_SIZE };
+			if (category) params.category = category;
+			if (subArea) params.sub_area = subArea;
+			api
+				.get("/search", { params, timeout: 20000 })
+				.then((res: any) => {
+					if (cancelled) return;
+					const items = (res.data.results || []).map((r: any) => ({
+						...r,
+						type: "place",
+					}));
+					setSearchResults(items);
+					setAnnouncement(
+						`${items.length} result${items.length === 1 ? "" : "s"} for ${searchTerm} in ${region}`,
+					);
+				})
+				.catch(() => {
+					// Search unavailable: fall back to filtering what is already loaded
+					if (!cancelled) setSearchResults(null);
+				})
+				.finally(() => {
+					if (!cancelled) setSearching(false);
+				});
+		}, 400);
+		return () => {
+			cancelled = true;
+			clearTimeout(timer);
+		};
+	}, [searchTerm, region, category, subArea]);
+
 	// Point the screen at any destination on earth: warm the catalog (backend
 	// geocodes and fans out to live sources if it's new), learn the canonical
 	// name, then let the recommendations fetch rank what came back.
@@ -758,7 +805,9 @@ export default function ExploreScreen() {
 		} catch {}
 	};
 
-	const filtered = search
+	const filtered = searchResults
+		? searchResults
+		: search
 		? results.filter(
 				(r) =>
 					r.name?.toLowerCase().includes(search.toLowerCase()) ||
@@ -886,7 +935,7 @@ export default function ExploreScreen() {
 				<div style={styles.searchRow}>
 					<input
 						style={styles.searchInput}
-						placeholder="Filter these results..."
+						placeholder={region ? `Search places in ${region}...` : "Filter these results..."}
 						value={search}
 						onChange={(e) => setSearch(e.target.value)}
 					/>
@@ -964,7 +1013,7 @@ export default function ExploreScreen() {
 			</div>
 
 			{category || search ? (
-				loading ? (
+				loading || searching ? (
 					<div style={styles.loading}>
 						{region
 							? `Finding the best of ${region} for you...`
