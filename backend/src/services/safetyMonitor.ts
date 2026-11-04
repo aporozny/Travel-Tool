@@ -133,17 +133,38 @@ export async function escalateOverdueTrips(now: Date): Promise<{ escalated: numb
 			}
 
 			const ctx = await loadContext(trip, now, true);
+			// A contact only counts as reached when at least one message to them was
+			// really sent. sendEmail and sendSms return false when the provider is not
+			// configured or the send fails, and that must not be reported as success.
+			const reached: any[] = [];
+			const notReached: any[] = [];
 			for (const c of contacts) {
 				const withLoc = c.can_see_location
 					? { ...ctx, lastLocation: (await loadContext(trip, now, false)).lastLocation }
 					: ctx;
 				const m = contactOverdueMessage(withLoc);
-				if (c.email) await sendEmail(c.email, m.subject, m.text);
-				if (c.phone) await sendSms(c.phone, m.sms);
+				const emailSent = c.email ? await sendEmail(c.email, m.subject, m.text) : false;
+				const smsSent = c.phone ? await sendSms(c.phone, m.sms) : false;
+				(emailSent || smsSent ? reached : notReached).push(c);
 			}
-			await pool.query("UPDATE safety_contacts SET notified_at = NOW() WHERE id = ANY($1::uuid[])", [contacts.map((c) => c.id)]);
+
+			if (reached.length === 0) {
+				// Nobody was told. Keep the trip overdue so the next tick tries again,
+				// and tell the reviewer once so a person can step in.
+				if (!trip.escalation_flagged_at) {
+					const reviewerCtx = await loadContext(trip, now, false);
+					const why = contacts.length === 0 ? "no emergency contacts are on file for this trip" : `none of the ${contacts.length} contact(s) could be reached (the email or SMS did not send)`;
+					await sendReviewerAlert({ subject: `Drift safety: CONTACTS NOT REACHED (${reviewerCtx.travellerName})`, body: `${reviewerCtx.travellerName} is still overdue on the trip to ${reviewerCtx.destination} and ${why}. Please contact them yourself. Drift will keep retrying.`, urgent: true });
+					await pool.query("UPDATE member_trips SET escalation_flagged_at = NOW() WHERE id = $1", [trip.id]);
+					flagged++;
+				}
+				continue;
+			}
+
+			await pool.query("UPDATE safety_contacts SET notified_at = NOW() WHERE id = ANY($1::uuid[])", [reached.map((c) => c.id)]);
 			await pool.query("UPDATE member_trips SET safety_status = 'escalated', escalated_at = NOW() WHERE id = $1", [trip.id]);
-			await sendReviewerAlert({ subject: `Drift safety: emergency contacts messaged (${ctx.travellerName})`, body: `${contacts.length} contact(s) were messaged about the missed check-in on the trip to ${ctx.destination}.`, urgent: false });
+			const missed = notReached.length ? ` ${notReached.length} contact(s) could not be reached: ${notReached.map((c) => c.name).join(", ")}.` : "";
+			await sendReviewerAlert({ subject: `Drift safety: emergency contacts messaged (${ctx.travellerName})`, body: `${reached.length} of ${contacts.length} contact(s) were messaged about the missed check-in on the trip to ${ctx.destination}.${missed}`, urgent: notReached.length > 0 });
 			escalated++;
 		} catch (err) {
 			console.error(`Safety monitor: escalation failed for trip ${trip.id}:`, err);
