@@ -709,7 +709,10 @@ export async function getRecommendations(
 
 	// Cache the full scored pool (not a pre-sliced page) for 1 hour for
 	// authenticated users, so subsequent "load more" pages reuse it.
-	if (userId) {
+	// Never cache an empty pool: empty usually means an upstream problem (for
+	// example expired catalog rows during a Google outage), and caching it would
+	// keep the page empty for an hour after the cause is fixed.
+	if (userId && scored.length > 0) {
 		await redis.setex(cacheKey, 3600, JSON.stringify(scored));
 	}
 	}
