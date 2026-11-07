@@ -36,6 +36,8 @@ if docker ps --format '{{.Names}}' | grep -qx "$VW"; then
       echo "$(timestamp) voice worker unhealthy - restarting" >> $LOG
       echo "$now" > "$STAMP"
       docker restart "$VW" >> $LOG 2>&1 || true
+      # Page the reviewer by SMS and email through the backend (needs drift-alert.sh installed).
+      bash /usr/local/bin/drift-alert.sh "Drift Safety Line restarted" "The voice worker was unhealthy and the watchdog restarted it. Please make a test call to +61 2 5943 7810." >> $LOG 2>&1 || true
       if [ -n "$DRIFT_ALERT_WEBHOOK" ]; then
         curl -s -m 10 -X POST -H 'Content-Type: application/json' \
           -d '{"text":"Drift Safety Line voice worker was unhealthy and has been restarted"}' \
