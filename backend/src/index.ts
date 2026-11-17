@@ -38,6 +38,7 @@ import { startSafetyMonitor } from './services/safetyMonitor';
 import { startPaymentReconciler } from './services/flightPayments';
 import { startTripgicOrderSync } from './services/tripgicOrderSync';
 import { startPlacesHealthCheck } from './services/placesHealth';
+import { startLocationRetention } from './services/locationRetention';
 import { voiceAgentRouter } from './routes/voiceAgent';
 import { errorHandler } from './middleware/errorHandler';
 import { notFound } from './middleware/notFound';
@@ -120,5 +121,6 @@ if (require.main === module) {
     startPaymentReconciler();
     startTripgicOrderSync();
     startPlacesHealthCheck();
+    startLocationRetention();
   });
 }
