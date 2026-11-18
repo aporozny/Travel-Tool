@@ -56,6 +56,11 @@ module.exports = {
 				test: /\.(png|jpe?g|gif|svg)$/,
 				type: "asset/resource",
 			},
+			{
+				test: /\.woff2$/,
+				type: "asset/resource",
+				generator: { filename: "fonts/[name].[contenthash][ext]" },
+			},
 		],
 	},
 
