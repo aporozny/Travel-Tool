@@ -18,11 +18,79 @@
         -webkit-font-smoothing: antialiased;
       }
     </style>
-    <!-- Meta Pixel (ad measurement). Disclosed in the Privacy Policy, section 3. -->
+    <style>
+      #drift-consent { position: fixed; left: 12px; right: 12px; bottom: 12px; z-index: 2147483000; max-width: 560px; margin: 0 auto; background: #fff; color: #1a1a1a; border: 1px solid #d9d4c5; border-radius: 12px; box-shadow: 0 6px 24px rgba(0,0,0,.18); padding: 16px; font-size: 14px; line-height: 1.5; }
+      #drift-consent p { margin: 0 0 12px; }
+      #drift-consent a { color: #8a6d1f; }
+      #drift-consent .dc-row { display: flex; gap: 8px; flex-wrap: wrap; }
+      #drift-consent button { flex: 1 1 140px; font: inherit; font-weight: 600; padding: 10px 14px; border-radius: 8px; border: 1px solid #C9A84C; cursor: pointer; background: #fff; color: #1a1a1a; }
+      #drift-consent button:focus-visible, #drift-consent-link:focus-visible { outline: 2px solid #1a1a1a; outline-offset: 2px; }
+      #drift-consent-link { position: fixed; left: 8px; bottom: 8px; z-index: 2147482000; font: 12px 'DM Sans', sans-serif; background: rgba(255,255,255,.9); color: #555; border: 1px solid #d9d4c5; border-radius: 6px; padding: 3px 8px; cursor: pointer; }
+    </style>
+    <!--
+      Meta Pixel (ad measurement), loaded only after the visitor clicks Accept in the
+      banner below. Nothing is sent to Meta, and Meta's script is not even requested,
+      until then. A browser that sends Global Privacy Control is treated as a decline.
+      The choice is kept in localStorage under "drift_consent_v1". Disclosed in the
+      Privacy Policy, section 3.
+    -->
     <script>
-      !function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}(window,document,'script','https://connect.facebook.net/en_US/fbevents.js');
-      fbq('init', '1417950580288750');
-      fbq('track', 'PageView');
+      (function () {
+        var KEY = 'drift_consent_v1';
+        var PIXEL_ID = '1417950580288750';
+        function read() { try { return localStorage.getItem(KEY); } catch (e) { return null; } }
+        function write(v) { try { localStorage.setItem(KEY, v); } catch (e) {} }
+        function loadPixel() {
+          if (window.fbq) return;
+          !function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}(window,document,'script','https://connect.facebook.net/en_US/fbevents.js');
+          window.fbq('init', PIXEL_ID);
+          window.fbq('track', 'PageView');
+        }
+        function el(tag, attrs, text) {
+          var n = document.createElement(tag);
+          for (var k in attrs) n.setAttribute(k, attrs[k]);
+          if (text) n.textContent = text;
+          return n;
+        }
+        function removeUi() {
+          var a = document.getElementById('drift-consent'); if (a) a.remove();
+          var b = document.getElementById('drift-consent-link'); if (b) b.remove();
+        }
+        function choose(v) {
+          write(v);
+          removeUi();
+          if (v === 'granted') loadPixel();
+          showLink();
+        }
+        function showLink() {
+          var b = el('button', { id: 'drift-consent-link', type: 'button' }, 'Privacy choices');
+          b.addEventListener('click', function () { removeUi(); showBanner(); });
+          document.body.appendChild(b);
+        }
+        function showBanner() {
+          var box = el('div', { id: 'drift-consent', role: 'dialog', 'aria-label': 'Privacy choices' });
+          var p = el('p', {});
+          p.appendChild(document.createTextNode('We would like to use the Meta Pixel to measure our advertising. It sends Meta your page visits, IP address and browser details. We only turn it on if you accept. Drift works the same either way. '));
+          p.appendChild(el('a', { href: '/legal/privacy-terms.html#p-cookies' }, 'Read more'));
+          p.appendChild(document.createTextNode('.'));
+          var row = el('div', { 'class': 'dc-row' });
+          var no = el('button', { type: 'button' }, 'Decline');
+          var yes = el('button', { type: 'button' }, 'Accept');
+          no.addEventListener('click', function () { choose('denied'); });
+          yes.addEventListener('click', function () { choose('granted'); });
+          row.appendChild(no); row.appendChild(yes);
+          box.appendChild(p); box.appendChild(row);
+          document.body.appendChild(box);
+        }
+        function start() {
+          var saved = read();
+          if (navigator.globalPrivacyControl === true && saved !== 'granted') { write('denied'); saved = 'denied'; }
+          if (saved === 'granted') { loadPixel(); showLink(); }
+          else if (saved === 'denied') { showLink(); }
+          else { showBanner(); }
+        }
+        if (document.body) start(); else document.addEventListener('DOMContentLoaded', start);
+      })();
     </script>
   </head>
   <body>
