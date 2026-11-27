@@ -17,6 +17,16 @@ const C = {
   muted:     '#9B9590',
 };
 
+// Trip dates are calendar dates with no time. The API sends them either as
+// "2026-11-10" or as "2026-11-10T00:00:00.000Z", so read the date part and show
+// it as a plain date. Reading it in UTC keeps the day the traveller picked.
+function fmtTripDate(v?: string): string {
+  const m = v ? /^(\d{4})-(\d{2})-(\d{2})/.exec(v) : null;
+  if (!m) return v || '';
+  const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+  return d.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+}
+
 const REGIONS = [
   'Seminyak','Canggu','Ubud','Nusa Penida','Uluwatu',
   'Sanur','Amed','Tulamben','Lombok','Gili Islands','Flores','Sidemen',
@@ -126,7 +136,11 @@ export default function SafetyScreen() {
       const updated = await api.get('/safety/location/history?limit=10');
       setLocationHistory(updated.data || []);
     } catch (e: any) {
-      const msg = e.message || 'Could not get location';
+      // A 403 means Trip Mode (location consent) is off. Say so plainly,
+      // instead of the browser's "Request failed with status code 403".
+      const msg = e?.response?.status === 403
+        ? 'Turn on Trip Mode above to share your location, then try again.'
+        : e?.response?.data?.message || e.message || 'Could not get location';
       setGeoError(msg);
       alert(`Error: ${msg}`);
     } finally {
@@ -317,9 +331,11 @@ export default function SafetyScreen() {
             </div>
 
             {/* Overdue warning */}
-            {trips.some(t => t.safety_status === 'overdue') && (
+            {trips.some(t => t.safety_status === 'overdue' || t.safety_status === 'escalated') && (
               <div style={s.overdueAlert}>
-                ⚠ You have overdue check-ins. Go to Trips to check in now.
+                {trips.some(t => t.safety_status === 'escalated')
+                  ? '⚠ You missed a check-in and your emergency contacts were told. Go to Trips and check in now to let them know you are safe.'
+                  : '⚠ You have overdue check-ins. Go to Trips to check in now.'}
               </div>
             )}
           </div>
@@ -376,7 +392,7 @@ export default function SafetyScreen() {
                     <div style={s.tripHeader}>
                       <div>
                         <div style={s.tripDest}>{trip.destination}</div>
-                        {trip.start_date && <div style={s.tripDates}>{trip.start_date}{trip.end_date ? ` → ${trip.end_date}` : ''}</div>}
+                        {trip.start_date && <div style={s.tripDates}>{fmtTripDate(trip.start_date)}{trip.end_date ? ` → ${fmtTripDate(trip.end_date)}` : ''}</div>}
                       </div>
                       <span style={{ ...s.statusPill, color: statusColour, borderColor: statusColour }}>
                         {trip.safety_status}
@@ -389,15 +405,18 @@ export default function SafetyScreen() {
                     {trip.safety_status === 'overdue' && (
                       <div style={s.overdueAlert}>⚠ Check-in overdue</div>
                     )}
+                    {trip.safety_status === 'escalated' && (
+                      <div style={s.overdueAlert}>⚠ Check-in missed. Your emergency contacts were told. Check in to let them know you are safe.</div>
+                    )}
                     <div style={s.tripActions}>
                       {trip.safety_status === 'planned' && (
                         <button style={s.actionBtn} onClick={() => handleStartTrip(trip.id)}>Start trip</button>
                       )}
-                      {['active', 'overdue'].includes(trip.safety_status) && (
+                      {['active', 'overdue', 'escalated'].includes(trip.safety_status) && (
                         <button style={{ ...s.actionBtn, background: C.gold, color: '#fff', borderColor: C.gold }}
                           onClick={() => handleCheckin(trip.id)}>✓ Check in</button>
                       )}
-                      {['active', 'overdue'].includes(trip.safety_status) && (
+                      {['active', 'overdue', 'escalated'].includes(trip.safety_status) && (
                         <button style={s.actionBtnGhost} onClick={() => handleCompleteTrip(trip.id)}>Mark safe</button>
                       )}
                     </div>
